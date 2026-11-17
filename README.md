@@ -92,6 +92,10 @@ pnpm verify:changed   # 提交前，只查改动（约 30 秒）
 pnpm verify           # push / PR 前，完整门禁
 ```
 
+Tauri + Rust 迁移预览可使用 `pnpm tauri:dev` 启动，使用 `pnpm verify:tauri` 验证。
+该入口仍在开发中，尚不能替代现有应用；环境要求、已实现能力和限制见
+[Tauri 迁移预览](src-tauri/README.md)。
+
 - 用 AI 编码助手开发：先读 [AGENTS.md](AGENTS.md)，指南见 [用 AI 加功能](docs/contributing/vibe-coding.zh-CN.md)
 - 贡献：[CONTRIBUTING.zh-CN.md](CONTRIBUTING.zh-CN.md) · [垂直切片](docs/contributing/vertical-slice.md) · [测试](docs/contributing/testing.md)
 - 打包与发版：[packaging.zh-CN.md](docs/contributing/packaging.zh-CN.md)

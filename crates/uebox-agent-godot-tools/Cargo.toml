@@ -1,0 +1,36 @@
+[package]
+name = "uebox-agent-godot-tools"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[dependencies]
+uebox-agent-core = { path = "../uebox-agent-core" }
+uebox-engine-core = { path = "../uebox-engine-core" }
+uebox-godot-session = { path = "../uebox-godot-session" }
+serde_json = "1"
+tokio = { version = "1", features = ["rt", "sync"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "io-util", "net"] }
+
+[features]
+test-fixtures = []
+real-editor = []
+
+[[bin]]
+name = "godot-agent-test-editor"
+path = "tests/support/fake_editor.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
+name = "tools"
+path = "tests/tools.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
+name = "real_editor"
+path = "tests/real_editor.rs"
+required-features = ["real-editor"]

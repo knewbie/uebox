@@ -1,0 +1,32 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Unreal Box Preview",
+  "version": "1.0.12",
+  "identifier": "com.uebox.tauri-preview",
+  "build": {
+    "beforeDevCommand": "pnpm tauri:ui:dev",
+    "devUrl": "http://127.0.0.1:1420",
+    "beforeBuildCommand": "pnpm tauri:ui:build",
+    "frontendDist": "ui/dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Unreal Box Preview",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 640,
+        "minHeight": 520
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: http://asset.localhost data:; connect-src ipc: http://ipc.localhost",
+      "devCsp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: http://asset.localhost data:; connect-src ipc: http://ipc.localhost http://127.0.0.1:1420 ws://127.0.0.1:1420"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": ["../build/icon.png", "../build/icon.icns", "../build/icon.ico"]
+  }
+}

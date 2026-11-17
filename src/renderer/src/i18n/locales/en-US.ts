@@ -1,4 +1,173 @@
 export default {
+  tauriPreview: {
+    previewLabel: 'Tauri preview',
+    title: 'Migration in progress',
+    description:
+      'This entry is being migrated to a Rust host. Use the existing Electron application for existing features.',
+    warning: 'This preview cannot replace the existing app yet',
+    warningDetail:
+      'Unreal and Unity have limited read-only queries; full engine support, the AI assistant, libraries, and settings are not connected yet.',
+    hostTitle: 'Local host',
+    hostDetail: 'This information comes from the Rust process running this window.',
+    loading: 'Reading host information…',
+    hostError: 'Unable to reach the Rust host',
+    hostErrorDetail: 'Launch this entry through Tauri. Error: {error}',
+    runtime: 'Backend',
+    process: 'Process ID',
+    platform: 'System',
+    version: 'Version',
+    capabilitiesTitle: 'Feature status',
+    unavailable: 'Not yet available',
+    available: 'Available',
+    capabilities: {
+      engines: 'Engine connections (full)',
+      agent: 'AI assistant',
+      libraries: 'Project and content libraries',
+      settings: 'Application settings'
+    },
+    language: 'Language',
+    appearance: 'Appearance',
+    system: 'System',
+    light: 'Light',
+    dark: 'Dark',
+    godotAgent: {
+      title: 'Godot read-only assistant preview',
+      intro:
+        'Configure a model for this connected editor. Messages and requested project or scene data are sent to the selected service. Only two read-only Godot tools are available; the full assistant is not migrated.',
+      target: 'Fixed Godot session',
+      endpoint: 'Full Chat Completions URL',
+      model: 'Model name',
+      credential: 'Bearer credential (optional, memory only)',
+      create: 'Configure assistant',
+      close: 'Close assistant',
+      message: 'Message',
+      send: 'Send',
+      cancel: 'Cancel',
+      unavailable: 'Connect the Godot session before configuring the assistant.',
+      error: 'Assistant operation failed',
+      user: 'You',
+      assistant: 'Assistant',
+      phase: {
+        running: 'Responding…',
+        cancelling: 'Cancelling…',
+        draining: 'Draining an in-flight read…',
+        completed: 'Completed',
+        cancelled: 'Cancelled',
+        failed: 'Failed'
+      },
+      errors: {
+        target_unavailable: 'The selected Godot connection is no longer available.',
+        agent_unavailable: 'This assistant session is no longer available.',
+        agent_already_exists: 'This editor already has an assistant or is draining a previous one.',
+        agent_busy: 'The editor or assistant is busy; wait for the current operation to finish.',
+        invalid_model_configuration: 'The model URL, model name or credential is invalid.',
+        invalid_message: 'Enter a message within the allowed size.',
+        model_network_error: 'The model service could not be reached.',
+        model_http_error: 'The model service returned an unsuccessful HTTP status.',
+        model_protocol_error: 'The model service returned an invalid or incomplete stream.',
+        model_output_limit: 'The model stopped at its output limit.',
+        model_provider_error: 'The model service reported an error.',
+        agent_step_limit: 'The assistant reached its step limit.',
+        agent_context_limit: 'The conversation exceeds the request size limit.',
+        agent_output_buffer_limit: 'The assistant output exceeded the pending display buffer.',
+        credential_unavailable: 'The in-memory credential is no longer available.',
+        generic: 'The operation failed. Check the selected session and model configuration.'
+      }
+    },
+    godot: {
+      title: 'Godot editor preview',
+      intro:
+        'Select a trusted local Godot executable and project. The project plugin must already be enabled; it is not installed or enabled here.',
+      releaseHint: 'Releasing management does not close the editor.',
+      connectionHint:
+        'Connect only when you choose. After an error, refresh the state before trying a starting editor again. An established disconnected session is not reconnected automatically.',
+      executable: 'Absolute path to the Godot executable',
+      executableHint: 'On macOS choose the executable inside the app, not the .app folder.',
+      project: 'Absolute path to the Godot project directory',
+      launch: 'Start Godot editor',
+      launching: 'Starting the selected editor…',
+      session: 'Managed session',
+      lastStatus: 'Last observed state',
+      connect: 'Connect once',
+      readProject: 'Read project',
+      readScene: 'Read scene tree',
+      refreshStatus: 'Refresh state',
+      release: 'Release management',
+      working: 'Working…',
+      projectResult: 'Project details',
+      sceneResult: 'Scene tree',
+      error: 'Godot operation failed',
+      state: {
+        starting: 'Starting',
+        ready: 'Ready',
+        disconnected: 'Disconnected',
+        startup_expired: 'Startup window expired',
+        exited: 'Editor exited',
+        unknown: 'Unknown; refresh the state'
+      }
+    },
+    unreal: {
+      title: 'Unreal Engine read-only query',
+      intro:
+        'Start the local listener manually, refresh the registered instances, and select a project to read its details. No automatic selection or retries are performed.',
+      trust:
+        'Local connections do not authenticate the plugin; another local process can connect or impersonate it.',
+      port: 'Listener port',
+      portHint:
+        'The default port is 17860; this preview binds it only when you start the listener.',
+      start: 'Start listener',
+      stop: 'Stop listener',
+      refresh: 'Refresh instances',
+      listening: 'Listening on {address}:{port}',
+      notListening: 'Listener not started',
+      empty: 'No registered project instances.',
+      instances: 'Registered instances',
+      select: 'Select',
+      selected: 'Selected',
+      interactive: 'Interactive instance',
+      nonInteractive: 'Non-interactive instance',
+      selectionLost: 'The previous selection is no longer valid. Select an instance again.',
+      query: 'Read project details',
+      querying: 'Reading project details…',
+      result: 'Project details',
+      error: 'Unreal operation failed'
+    },
+    unity: {
+      title: 'Unity read-only query',
+      intro:
+        'Connect to the selected local Unity MCP port to read the project and active scene. No automatic discovery or reconnection is performed.',
+      warning: 'Connecting may affect an existing client',
+      warningDetail:
+        'A new connection may disconnect an existing client on this Unity MCP port, even if the project path does not match.',
+      trust:
+        'This local bridge does not authenticate its peer; after a restart, the same path and port may point to a different editor instance. Select only a port you trust.',
+      preferences:
+        'Although this only reads project and scene data, the Unity MCP plugin may initialize user-level EditorPrefs when it first discovers tools.',
+      projectPath: 'Absolute Unity project root path',
+      port: 'Unity MCP port',
+      portHint: 'Enter a port from 1 to 65535. No port is selected automatically.',
+      confirm:
+        'I understand and allow this connection to potentially disconnect the existing client on this port',
+      query: 'Read project and active scene',
+      reading: 'Reading the Unity editor…',
+      error: 'Unity query failed',
+      project: 'Project',
+      root: 'Project root',
+      version: 'Unity version',
+      assets: 'Assets path',
+      platform: 'Platform',
+      pipeline: 'Render pipeline',
+      scene: 'Active scene',
+      scenePath: 'Scene path',
+      empty: 'Empty',
+      buildIndex: 'Build index',
+      dirty: 'Unsaved changes',
+      loaded: 'Loaded',
+      roots: 'Root objects',
+      yes: 'Yes',
+      no: 'No'
+    }
+  },
   mediaPermissions: {
     macScreenDenied:
       'Screen recording access is blocked. In System Settings → Privacy & Security → Screen Recording (or Screen & System Audio Recording), allow Unreal Box, then restart the app.',

@@ -1,0 +1,17 @@
+[package]
+name = "uebox-agent-unity-tools"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[dependencies]
+uebox-agent-core = { path = "../uebox-agent-core" }
+uebox-engine-core = { path = "../uebox-engine-core" }
+uebox-engine-unity = { path = "../uebox-engine-unity" }
+serde_json = "1"
+tokio = { version = "1", features = ["rt", "sync"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }

@@ -1,0 +1,22 @@
+import { defineConfig } from 'vite'
+import vue from '@vitejs/plugin-vue'
+import { fileURLToPath, URL } from 'node:url'
+
+export default defineConfig({
+  root: fileURLToPath(new URL('.', import.meta.url)),
+  plugins: [vue()],
+  resolve: {
+    alias: {
+      '@renderer': fileURLToPath(new URL('../../src/renderer/src', import.meta.url))
+    }
+  },
+  define: {
+    __INTLIFY_JIT_COMPILATION__: true
+  },
+  server: {
+    host: '127.0.0.1',
+    port: 1420,
+    strictPort: true
+  },
+  clearScreen: false
+})

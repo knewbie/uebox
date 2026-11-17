@@ -1,0 +1,11 @@
+[package]
+name = "uebox-data"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[dependencies]
+rusqlite = { version = "0.32", features = ["backup", "bundled"] }
+tempfile = "3"

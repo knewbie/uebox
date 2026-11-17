@@ -1,0 +1,225 @@
+# Tauri migration preview / Tauri 迁移预览
+
+This is a separate preview entry. It does not implement the Electron bridge. A limited
+Unity project and active-scene query, an Unreal project query, and a Godot editor
+preview are available only after explicit user actions.
+Use the Electron application for existing features.
+Its identifier is separate so it does not use the Electron application's webview
+preferences. Node is used only to build/serve the frontend during development;
+the application backend and commands run in the Tauri Rust process.
+
+这是独立的迁移预览入口，不实现 Electron 桥；只有用户主动操作才会执行有限的 Unity
+项目和活动场景查询、Unreal 项目只读查询，以及 Godot 编辑器预览。现有功能请继续使用
+Electron 版本。预览版使用独立标识，不读取 Electron 的 WebView 偏好设置。Node 只在
+开发时构建或提供前端文件，应用后端和命令运行在 Tauri 的 Rust 进程内。
+
+## Development / 开发
+
+```sh
+pnpm install
+pnpm tauri:dev
+```
+
+`pnpm tauri:build` builds the native application. Rust and the platform prerequisites
+for Tauri 2 must be installed. The normal Electron commands are unchanged.
+
+`pnpm tauri:build` 构建原生应用；需先安装 Rust 和 Tauri 2 对应平台的系统依赖。
+原有 Electron 命令不变。
+
+### Engine features / 引擎编译选项
+
+The default Cargo features include `unity`, `unreal`, and `godot`. A host can instead
+be built with exactly one engine, or with no engines:
+
+默认 Cargo features 同时启用 `unity`、`unreal` 和 `godot`。也可以只编译一种引擎，
+或不编译任何引擎：
+
+```sh
+cargo build --manifest-path src-tauri/Cargo.toml --no-default-features --features unity
+cargo build --manifest-path src-tauri/Cargo.toml --no-default-features --features unreal
+cargo build --manifest-path src-tauri/Cargo.toml --no-default-features --features godot
+cargo build --manifest-path src-tauri/Cargo.toml --no-default-features
+```
+
+To build a single-engine Tauri debug executable with the bundled frontend:
+
+如需构建包含前端的单引擎 Tauri 调试程序：
+
+```sh
+pnpm tauri build --debug --no-bundle --features unity -- --no-default-features
+pnpm tauri build --debug --no-bundle --features unreal -- --no-default-features
+pnpm tauri build --debug --no-bundle --features godot -- --no-default-features
+```
+
+An excluded engine's commands and state are not registered, and its panel is
+marked unavailable. The feature flag means the adapter is compiled in; it does
+not indicate an editor is connected or that full engine support is complete.
+
+未编译引擎的命令和状态不会注册，界面会标记该面板不可用。feature 只表示适配器已编译，
+不表示编辑器已连接或完整引擎功能已完成。
+
+## Interface / 接口
+
+The host assembles `src/unity.rs`, `src/unreal.rs`, and `src/godot.rs` as separate command and
+state modules. The preview keeps each engine's panel and command wrappers in
+its own `ui/src/engines/` directory; `App.vue` composes them and passes the
+host OS to the Unity panel for path validation. Shared panel styling and the
+existing locale namespace remain engine-neutral.
+
+宿主分别在 `src/unity.rs`、`src/unreal.rs` 和 `src/godot.rs` 中维护各引擎命令与状态。
+预览界面在 `ui/src/engines/` 下分别维护各自的面板和命令封装；`App.vue`
+负责组合，并向 Unity 面板传入宿主操作系统用于路径校验。面板基础样式和现有语言包
+命名空间保持为中立的共享部分。
+
+`host_status` returns `backend`, `processId`,
+`os`, `architecture`, `version`, `migration`, `engineModules: { unity, unreal, godot }`
+and a list of `{ id, available }`
+capabilities. The values describing the process and platform come from Rust. Engine
+support, the agent, libraries and application settings are marked unavailable
+until their implementations are integrated. There is no generic IPC channel.
+
+`host_status` 返回 `backend`、`processId`、`os`、`architecture`、
+`version`、`migration`、`engineModules: { unity, unreal, godot }` 和 `{ id, available }`
+能力列表。`engineModules` 表示编译进当前宿主的适配器。进程与平台字段由 Rust
+读取；完整引擎功能、Agent、资料库和应用设置在实现接入前均标记为不可用。没有通用 IPC 通道。
+
+`inspect_unity({ projectRoot, port, allowClientTakeover })` requires an existing absolute project directory,
+an explicit nonzero TCP port, and `allowClientTakeover: true`. Omitted, false, or
+legacy generic confirmation is denied before a socket is opened. The address is fixed to
+`127.0.0.1`; no ports are probed automatically. It connects on a blocking worker,
+checks the reported project path, reads the active scene and returns `{ project, scene }`,
+then closes the connection. Same-port requests in flight are rejected. Each new
+connection can disconnect an existing client, including before project verification;
+the UI requires a new acknowledgement for each attempt. This bridge does not
+authenticate the peer, so a matching path is not proof of editor identity. The same
+project path and port after a restart can refer to a different editor instance.
+The third-party Unity MCP plugin may initialize user-level EditorPrefs during
+tool discovery even though these commands only query project and scene data.
+
+`inspect_unity({ projectRoot, port, allowClientTakeover })` 要求真实存在的绝对项目根目录、明确指定的非零
+TCP 端口及 `allowClientTakeover: true`。缺省、false 或旧的普通确认参数均在连接前拒绝。
+地址固定为 `127.0.0.1`，不会自动探测端口。命令在阻塞
+工作线程连接、核对对端报告的项目路径、读取活动场景并返回 `{ project, scene }`，随后关闭连接；
+同端口并发请求会被拒绝。每次新连接都可能挤掉现有客户端，甚至在校验项目之前就发生；
+界面要求每次尝试重新确认。桥接协议不验证对端身份，项目路径匹配不等于编辑器身份可信；
+重启后相同项目路径与端口也可能指向另一个编辑器实例。
+虽然命令只查询项目和场景，第三方 Unity MCP 插件发现工具时仍可能初始化用户级 EditorPrefs。
+
+The Unreal preview starts no listener on boot. The user chooses a nonzero port and
+explicitly starts `start_unreal_listener({ port })`, which binds only `127.0.0.1`.
+`list_unreal_instances()` returns registered project announcements, and only an
+explicitly chosen `connection_id` can be passed to
+`query_unreal_project({ connectionId })`. The latter sends only the read-only
+`project.info` request with a 10-second deadline and returns its actual result or
+error. The bridge rotates selection IDs on project changes or invalidation; a
+disconnected or stale selection fails instead of choosing another instance. No
+request is automatically retried. `stop_unreal_listener()` closes the listener,
+connections and pending requests before returning. The local protocol does not
+authenticate connecting processes; an announced project is not proof of identity.
+
+Unreal 预览启动时不监听。用户选择非零端口并明确启动
+`start_unreal_listener({ port })` 后才绑定 `127.0.0.1`。
+`list_unreal_instances()` 返回已登记的项目，用户明确选择的 `connection_id`
+可传给 `query_unreal_project({ connectionId })`。该命令仅发送只读的
+`project.info` 请求，期限为 10 秒，返回实际结果或错误。项目变化或登记失效时，桥接层
+会轮换选择 ID；断线或失效的选择会失败，不会自动改选，也不会自动重试。
+`stop_unreal_listener()` 会等待监听器、连接和待处理请求清理后返回。本地协议不验证连接
+进程的身份，项目登记信息不能证明身份。
+
+`launch_godot({ executable, project })` requires an explicitly selected absolute
+native executable and an absolute project directory. The user's launch action
+authorizes starting that editor; the host acknowledges the crate's v1 protocol
+boundary internally. It starts the selected interactive editor with the
+session crate's fixed arguments on a blocking worker. The project must already
+have the addon enabled; no plugin is installed or project copied. Launch returns
+only a host-generated opaque `sessionId` and `starting` state. No token or port is
+returned to the WebView. `connect_godot`, `query_godot_project`,
+`query_godot_scene`, `status_godot_session`, and `release_godot_session` require
+that exact ID. They do not discover, attach, poll, or reconnect automatically.
+Initial connection attempts are explicit; an established disconnected session is terminal.
+
+Godot's v1 protocol does not authenticate the server, sends its token in plaintext
+over loopback, and passes it in the editor's environment. Local processes or
+project code can read it or forge responses. Launching a project can execute its
+scripts and plugins and write project or editor files. Releasing management neither
+kills the editor nor revokes the addon; its listener and token may persist until
+the editor closes. The preview is not a secure public production integration.
+
+`launch_godot({ executable, project })` 要求明确选择的本机可执行文件绝对路径和项目
+目录绝对路径。用户点击启动即授权启动该编辑器；宿主在内部确认 crate 的 v1 协议边界。
+命令在阻塞工作线程中使用
+session crate 的固定参数启动所选交互式编辑器。项目必须预先启用插件；不会安装插件或
+复制项目。启动仅返回宿主生成的不透明 `sessionId` 与 `starting` 状态，不向 WebView
+返回令牌或端口。`connect_godot`、`query_godot_project`、`query_godot_scene`、
+`status_godot_session` 和 `release_godot_session` 均要求该 ID；不自动发现、附着、
+轮询或重连。初始连接由用户主动触发，已建立后断开的会话不可自动恢复。
+
+Godot v1 协议不验证服务器身份，令牌在本机回环上明文传输，并进入编辑器环境。本机
+进程或项目代码可能读取令牌或伪造响应。启动项目可能运行脚本和插件并写入项目或编辑器
+文件。释放管理不会结束编辑器或撤销插件；监听和令牌可能持续到编辑器关闭。此预览不是
+安全的公开生产集成。
+
+The loopback restriction applies to the bridge; Godot's LSP/DAP and project-defined
+services may open other network ports. Native executable checks do not authenticate
+the binary, and the host does not verify that the addon is enabled. Port allocation
+also has a release-before-bind race. A host crash may bypass cleanup, and OS logout
+or shutdown can end the editor.
+
+回环限制只适用于桥接；Godot 的 LSP/DAP 和项目定义的服务可能打开其他网络端口。本机
+可执行文件检查不能认证程序身份，宿主也不会验证插件是否已启用。端口分配存在释放后
+再绑定的竞态。宿主崩溃可能绕过清理，系统注销或关闭也可能结束编辑器。
+
+`uebox-tauri --host-status-json` prints the same status without opening a window;
+its `processId` belongs to that diagnostic process. The window's status reports
+the process running the window instead.
+
+`uebox-tauri --host-status-json` 无需打开窗口即可输出同一状态；其中 `processId`
+属于诊断进程，窗口展示的则是运行窗口的进程。
+
+For local diagnosis, setting `UEBOX_TAURI_TRACE=1` logs the process ID to stderr
+when the status is read. It does not enable a network service.
+
+本地排查时，可设置 `UEBOX_TAURI_TRACE=1`，在读取状态时将进程 ID 写到 stderr；
+这不会启用网络服务。
+
+## Focused checks / 针对性检查
+
+```sh
+cargo test --manifest-path src-tauri/Cargo.toml --test host_binary
+cargo test --manifest-path src-tauri/Cargo.toml --test unity_command
+cargo test --manifest-path src-tauri/Cargo.toml --test unreal_command
+cargo test --manifest-path src-tauri/Cargo.toml --test engine_features
+cargo test --manifest-path src-tauri/Cargo.toml --test godot_command
+cargo build --manifest-path src-tauri/Cargo.toml --example unreal_ui_harness
+pnpm tauri:ui:test
+pnpm exec vitest run --config src-tauri/ui/vitest.e2e.config.ts
+pnpm exec vue-tsc --noEmit -p src-tauri/ui/tsconfig.json
+pnpm tauri:ui:build
+```
+
+To opt in to the real Godot command test, set `UEBOX_TEST_GODOT_BIN` to a trusted
+native executable. This Unix-only test uses temporary projects, a private editor
+home, and two headless test-owned editors; it closes only those editors after
+verifying release. It has been run on macOS, not Windows or Linux.
+
+真实 Godot 命令测试需将 `UEBOX_TEST_GODOT_BIN` 指向可信的本机可执行文件。测试使用临时
+项目、隔离的编辑器配置目录和两个由测试启动的 headless 编辑器，验证释放后只关闭测试
+自己的编辑器。该测试仅适用于 Unix，目前只在 macOS 运行，未验证 Windows 或 Linux。
+
+```sh
+UEBOX_TEST_GODOT_BIN=/path/to/Godot cargo test --manifest-path src-tauri/Cargo.toml \
+  --no-default-features --features godot-real-editor-test --lib \
+  godot::real_editor_test::real_godot_commands_query_the_selected_temporary_editor_and_release_without_killing_it \
+  -- --exact
+```
+
+The Unreal UI integration test uses a test-only transport into the real Tauri
+commands and a Rust WebSocket fixture on an isolated local port. It does not test a
+native WebView or a real Unreal Editor. It locates the fixture under
+`CARGO_TARGET_DIR` when set, or `src-tauri/target` otherwise; use the same value
+for the Cargo build and Vitest run.
+
+Unreal 界面集成测试使用仅用于测试的传输调用真实 Tauri 命令，并在隔离的本地端口运行
+Rust WebSocket 夹具；它不验证原生 WebView 或真实 Unreal 编辑器。夹具从设置的
+`CARGO_TARGET_DIR` 读取，未设置时读取 `src-tauri/target`；Cargo 构建和 Vitest 运行
+时需使用相同的值。

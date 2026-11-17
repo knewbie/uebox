@@ -1,0 +1,14 @@
+[package]
+name = "uebox-project-library"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[dependencies]
+rusqlite = { version = "0.32", features = ["bundled"] }
+tempfile = "3"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }

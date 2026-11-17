@@ -14,6 +14,9 @@ build-*/
 *.log*
 coverage
 
+# Rust workspace crates: keep Cargo.lock, exclude local build artifacts.
+/crates/*/target/
+
 # pnpm-lock.yaml 必须进版本库：CI 用 `pnpm install --frozen-lockfile`，
 # 公开仓库也需要它才能复现构建。
 # 本仓库只用 pnpm。不要提交 package-lock.json / yarn.lock / .yarnrc，

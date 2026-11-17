@@ -1,0 +1,24 @@
+[package]
+name = "uebox-godot-session"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+uebox-engine-godot = { path = "../uebox-engine-godot" }
+serde_json = { version = "1.0.140", optional = true }
+
+[workspace]
+
+[features]
+real-editor = ["dep:serde_json"]
+test-fixtures = ["dep:serde_json"]
+
+[[bin]]
+name = "session-fixture-editor"
+path = "tests/support/session_fixture_editor.rs"
+required-features = ["test-fixtures"]
+
+[[test]]
+name = "real_editor"
+path = "tests/real_editor.rs"
+required-features = ["real-editor"]

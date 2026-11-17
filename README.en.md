@@ -92,6 +92,11 @@ pnpm verify:changed   # before commit, checks only your changes (~30 s)
 pnpm verify           # before push / PR, full gate
 ```
 
+The Tauri + Rust migration preview can be started with `pnpm tauri:dev`
+and checked with `pnpm verify:tauri`. It is still under development and cannot yet
+replace the existing application; see the [Tauri migration preview](src-tauri/README.md)
+for prerequisites, capabilities, and limitations.
+
 - Developing with an AI coding assistant: read [AGENTS.md](AGENTS.md) first; guide: [Add a feature with AI](docs/contributing/vibe-coding.md)
 - Contributing: [CONTRIBUTING.md](CONTRIBUTING.md) · [Vertical slice](docs/contributing/vertical-slice.md) · [Testing](docs/contributing/testing.md)
 - Packaging and releases: [packaging.md](docs/contributing/packaging.md)
