@@ -4512,6 +4512,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "uebox-project-collections"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "rusqlite",
+ "tempfile",
+ "uebox-project-library",
+]
+
+[[package]]
 name = "uebox-project-library"
 version = "0.1.0"
 dependencies = [
@@ -4546,6 +4556,7 @@ dependencies = [
  "uebox-engine-unreal",
  "uebox-godot-session",
  "uebox-legacy-history",
+ "uebox-project-collections",
  "uebox-project-library",
  "url",
 ]

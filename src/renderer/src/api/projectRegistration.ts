@@ -5,6 +5,7 @@
  */
 import { z } from 'zod'
 import type { ProjectRegistrationExportResult } from '../../../shared/projectRegistration'
+import type { ProjectCollectionsExportResult } from '../../../shared/projectCollectionsTransfer'
 
 export type { ProjectRegistrationExportResult }
 
@@ -27,7 +28,25 @@ const receipt = z.discriminatedUnion('success', [
   })
 ])
 
+const collectionReceipt = z.discriminatedUnion('success', [
+  z.object({ success: z.literal(true), count: z.number().int().min(0).max(4096) }),
+  z.object({
+    success: z.literal(false),
+    code: z.enum(['cancelled', 'busy', 'invalid', 'exists', 'unavailable'])
+  })
+])
+
 export const projectRegistrationAPI = {
+  async exportCollections(): Promise<ProjectCollectionsExportResult> {
+    try {
+      const receipt = await window.api?.database?.project?.exportCollections?.()
+      const parsed = collectionReceipt.safeParse(receipt)
+      if (parsed.success) return parsed.data
+    } catch {
+      // Keep host paths and diagnostics outside the renderer.
+    }
+    return { success: false, code: 'unavailable' }
+  },
   async exportRegistration(): Promise<ProjectRegistrationExportResult> {
     try {
       const result = await window.api?.database?.project?.exportRegistration?.()

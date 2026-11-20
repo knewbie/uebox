@@ -23,7 +23,10 @@ impl ProjectRegistrations {
         self.test_data_dir.set(path).unwrap();
     }
 
-    fn app_data_dir<R: Runtime>(&self, app: &AppHandle<R>) -> Result<PathBuf, &'static str> {
+    pub(crate) fn app_data_dir<R: Runtime>(
+        &self,
+        app: &AppHandle<R>,
+    ) -> Result<PathBuf, &'static str> {
         #[cfg(test)]
         if let Some(path) = self.test_data_dir.get() {
             return Ok(path.clone());
@@ -108,7 +111,7 @@ where
     .map_err(|_| "project_library_unavailable")?
 }
 
-async fn with_library<R, T>(
+pub(crate) async fn with_library<R, T>(
     app: AppHandle<R>,
     create: bool,
     operation: impl FnOnce(Option<&mut ProjectLibrary>) -> Result<T, &'static str> + Send + 'static,

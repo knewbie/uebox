@@ -29,6 +29,16 @@
         >
           <template #icon><PhExport /></template>
         </AppButton>
+        <AppButton
+          v-if="canExportCollections"
+          id="project-collection-export"
+          :loading="isExportingCollections"
+          :title="t('page.home.project.collectionTransfer.export')"
+          :aria-label="t('page.home.project.collectionTransfer.export')"
+          @click="handleExportCollections"
+        >
+          <template #icon><PhFolderOpen /></template>
+        </AppButton>
         <!-- 刷新跟这两个入口是一类事（都是在动工程库本身），放在一起 -->
         <AppButton
           :loading="isRefreshingProjects"
@@ -343,6 +353,23 @@ import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
 const isExportingRegistration = ref(false)
+const isExportingCollections = ref(false)
+const canExportCollections = Boolean(window.api?.database?.project?.exportCollections)
+
+async function handleExportCollections(): Promise<void> {
+  if (isExportingCollections.value) return
+  isExportingCollections.value = true
+  try {
+    const result = await projectRegistrationAPI.exportCollections()
+    if (result.success) {
+      message.success(t('page.home.project.collectionTransfer.exported', { count: result.count }))
+    } else if (result.code !== 'cancelled') {
+      message.error(t(`page.home.project.collectionTransfer.errors.${result.code}`))
+    }
+  } finally {
+    isExportingCollections.value = false
+  }
+}
 
 async function handleExportRegistration(): Promise<void> {
   if (isExportingRegistration.value) return

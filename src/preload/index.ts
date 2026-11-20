@@ -40,6 +40,7 @@ import type { NamingRulesSavePayload } from '../main/utils/namingRulesConfig'
 import type { ChatHistoryExportResult } from '../shared/chatHistoryTransfer'
 import type { PortableModelExportReply } from '../shared/modelProfileTransfer'
 import type { ProjectRegistrationExportResult } from '../shared/projectRegistration'
+import type { ProjectCollectionsExportResult } from '../shared/projectCollectionsTransfer'
 
 /**
  * `ws:status` / `ws:status-changed` 送过来的那个对象。
@@ -651,6 +652,8 @@ const api = {
     },
     // 项目相关操作（公共数据库）
     project: {
+      exportCollections: (): Promise<ProjectCollectionsExportResult> =>
+        ipcRenderer.invoke('db:project:exportCollections'),
       exportRegistration: (): Promise<ProjectRegistrationExportResult> =>
         ipcRenderer.invoke('db:project:exportRegistration'),
       saveCover: (projectKey: string, image: Uint8Array) =>

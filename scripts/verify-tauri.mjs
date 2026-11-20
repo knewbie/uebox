@@ -32,6 +32,7 @@ const crates = [
   'crates/uebox-agent-godot-tools/Cargo.toml',
   'crates/uebox-data/Cargo.toml',
   'crates/uebox-project-library/Cargo.toml',
+  'crates/uebox-project-collections/Cargo.toml',
   'crates/uebox-chat-history/Cargo.toml',
   'crates/uebox-legacy-history/Cargo.toml',
   'crates/uebox-credentials/Cargo.toml',

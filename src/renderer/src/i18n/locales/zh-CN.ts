@@ -24,6 +24,7 @@ export default {
       libraries: '项目库与资料库',
       settings: '应用设置',
       modelSettings: '模型设置',
+      projectCollections: '项目合集',
       projectRegistration: '项目登记',
       chatHistory: '对话历史',
       legacyHistory: '旧版对话归档'
@@ -33,6 +34,38 @@ export default {
     system: '跟随系统',
     light: '明亮',
     dark: '深色',
+    projectCollections: {
+      title: '项目合集',
+      intro: '将已登记的项目归入合集，并按需要调整合集顺序。',
+      refresh: '刷新',
+      loading: '正在加载合集…',
+      saving: '正在保存更改…',
+      loadError: '无法加载合集，请刷新重试。',
+      changeError: '无法更新合集，请重试。',
+      empty: '暂无合集，创建一个来整理项目。',
+      name: '合集名称（可选）',
+      create: '创建合集',
+      unnamed: '未命名合集',
+      list: '按显示顺序排列的合集',
+      memberCount: '{count} 个项目',
+      moveUp: '上移',
+      moveDown: '下移',
+      rename: '保存名称',
+      members: '合集中的项目',
+      membersHint: '勾选应属于此合集的已登记项目。',
+      noProjects: '请先登记项目，再将其加入合集。',
+      missingProject: '登记已不可用：{id}',
+      dissolve: '解散合集',
+      confirmDissolve: '确认解散「{name}」？项目登记和文件会保留。',
+      approveDissolve: '确认解散',
+      cancel: '取消',
+      importFile: '已导出的项目合集文件',
+      importAction: '导入合集',
+      imported: '已导入 {inserted} 个，已有 {existing} 个。',
+      importError: '无法导入项目合集文件。文件大小上限为 1 MiB。',
+      importMissingProject: '请先导入对应的项目登记，再导入这些合集。',
+      engines: { unreal: '虚幻引擎', unity: 'Unity', godot: 'Godot' }
+    },
     projectLibrary: {
       title: '项目登记',
       intro: '手动登记已有项目的目录。移除登记记录时会保留项目文件。',
@@ -2252,6 +2285,16 @@ export default {
         createFromTemplate: '用模板新建项目',
         importExisting: '导入已有项目',
         exportRegistration: '导出项目登记到 Tauri',
+        collectionTransfer: {
+          export: '导出项目合集',
+          exported: '已导出 {count} 个项目合集。',
+          errors: {
+            busy: '正在导出项目合集。',
+            invalid: '项目合集数据或目标位置无效。',
+            exists: '选择的位置已有文件。',
+            unavailable: '无法导出项目合集。'
+          }
+        },
         registrationExported: '已导出 {count} 条项目登记。',
         registrationExportErrors: {
           project_registration_export_busy: '正在导出项目登记。',

@@ -66,6 +66,7 @@ import type { ProjectCoverMode } from '../shared/projectCover'
 import type { ChatHistoryExportResult } from '../shared/chatHistoryTransfer'
 import type { PortableModelExportReply } from '../shared/modelProfileTransfer'
 import type { ProjectRegistrationExportResult } from '../shared/projectRegistration'
+import type { ProjectCollectionsExportResult } from '../shared/projectCollectionsTransfer'
 import type { SpotlightAction, SpotlightSearchResponse } from '../shared/spotlight'
 import type { NotebookContextLevel } from '../shared/notebookContext'
 import type { RealtimeEchoGuard } from '../shared/realtimeEchoGuard'
@@ -796,6 +797,7 @@ declare global {
       ) => Promise<{ success: boolean; data: any[]; error?: string }>
     }
     project: {
+      exportCollections: () => Promise<ProjectCollectionsExportResult>
       exportRegistration: () => Promise<ProjectRegistrationExportResult>
       saveCover: (
         projectKey: string,

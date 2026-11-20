@@ -198,6 +198,26 @@ Electron 的「导出模型配置」仅保存受支持的模型元数据和默�
 中选中并导入文件。原来使用凭据、OAuth 或自定义请求头的配置需重新授权。原系统存储继续保留，
 新系统凭据单独配置。
 
+### Project collections / 项目合集
+
+The project library can group registered projects, including offline entries,
+into named or unnamed collections. A project can belong to several collections.
+Changing collection order or dissolving a collection preserves the project
+registrations and files.
+
+In Electron's project toolbar, export registrations and project collections.
+Import the registrations first in Tauri, then choose and confirm the collection
+file. Projects match by engine and their originally registered absolute path.
+An import with a missing registration or conflicting collection leaves the
+current collection records intact.
+
+项目库支持将已登记的工程加入具名或未命名合集，离线工程也可使用。一个工程可以同时属于
+多个合集。调整顺序或解散合集会保留工程登记与文件。
+
+在 Electron 项目工具栏分别导出项目登记与项目合集。在 Tauri 先导入项目登记，再选择并
+确认合集文件。成员按引擎与最初登记的绝对路径匹配。若有登记缺失或合集冲突，现有合集记录
+会保留。
+
 ### Project registrations / 项目登记
 
 Choose an engine and enter a name and absolute project directory in the preview.

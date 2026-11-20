@@ -25,6 +25,7 @@ export default {
       libraries: 'Project and content libraries',
       settings: 'Application settings',
       modelSettings: 'Model settings',
+      projectCollections: 'Project collections',
       projectRegistration: 'Project registration',
       chatHistory: 'Chat history',
       legacyHistory: 'Legacy chat archive'
@@ -34,6 +35,39 @@ export default {
     system: 'System',
     light: 'Light',
     dark: 'Dark',
+    projectCollections: {
+      title: 'Project collections',
+      intro: 'Group registered projects and arrange collections in the order you prefer.',
+      refresh: 'Refresh',
+      loading: 'Loading collections…',
+      saving: 'Saving changes…',
+      loadError: 'Unable to load collections. Refresh to try again.',
+      changeError: 'Unable to update the collection. Try again.',
+      empty: 'No collections yet. Create one to group your projects.',
+      name: 'Collection name (optional)',
+      create: 'Create collection',
+      unnamed: 'Unnamed collection',
+      list: 'Collections in display order',
+      memberCount: '{count} projects',
+      moveUp: 'Move up',
+      moveDown: 'Move down',
+      rename: 'Save name',
+      members: 'Projects in this collection',
+      membersHint: 'Check the registered projects that belong to this collection.',
+      noProjects: 'Register a project before adding members.',
+      missingProject: 'Unavailable registration: {id}',
+      dissolve: 'Dissolve collection',
+      confirmDissolve: 'Dissolve “{name}”? Project registrations and project files will be kept.',
+      approveDissolve: 'Confirm dissolution',
+      cancel: 'Cancel',
+      importFile: 'Project collection export file',
+      importAction: 'Import collections',
+      imported: '{inserted} imported, {existing} already present.',
+      importError: 'Unable to import the collection file. There is a 1 MiB limit.',
+      importMissingProject:
+        'Import the matching project registrations before importing their collections.',
+      engines: { unreal: 'Unreal Engine', unity: 'Unity', godot: 'Godot' }
+    },
     projectLibrary: {
       title: 'Project registration',
       intro:
@@ -2306,6 +2340,16 @@ First work out why the install failed from the output above. If you can run comm
         createFromTemplate: 'New project from template',
         importExisting: 'Import existing project',
         exportRegistration: 'Export project registrations for Tauri',
+        collectionTransfer: {
+          export: 'Export project collections',
+          exported: '{count} project collections exported.',
+          errors: {
+            busy: 'A collection export is already in progress.',
+            invalid: 'The collection data or destination is invalid.',
+            exists: 'A file already exists at the selected location.',
+            unavailable: 'Unable to export project collections.'
+          }
+        },
         registrationExported: '{count} project registrations exported.',
         registrationExportErrors: {
           project_registration_export_busy: 'A registration export is already in progress.',

@@ -3,6 +3,7 @@ import * as fs from 'fs'
 import * as path from 'path'
 import { getPublicDatabase } from '../index'
 import { registerProjectRegistrationExportIPC } from './projectRegistrationExport'
+import { registerProjectCollectionExportIPC } from './projectCollectionExport'
 import {
   createProject,
   getProjectByKey,
@@ -666,6 +667,7 @@ export async function registerProjectByUproject(filePath: string): Promise<Regis
  */
 export const registerProjectIPC = (): void => {
   registerProjectRegistrationExportIPC()
+  registerProjectCollectionExportIPC()
   ipcMain.handle('db:project:saveCover', async (_, projectKey: string, image: Uint8Array) => {
     try {
       if (

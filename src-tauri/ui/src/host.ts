@@ -5,6 +5,7 @@ export type CapabilityId =
   | 'agent'
   | 'libraries'
   | 'projectRegistration'
+  | 'projectCollections'
   | 'chatHistory'
   | 'legacyHistory'
   | 'modelSettings'

@@ -6,6 +6,7 @@ mod godot_agent;
 mod host;
 mod legacy_history;
 mod profile_storage;
+mod project_collections;
 mod project_library;
 mod settings;
 #[cfg(feature = "unity")]
@@ -63,6 +64,13 @@ pub fn configure_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> taur
         project_library::register_project,
         project_library::remove_registered_project,
         project_library::import_registered_projects,
+        project_collections::list_project_collections,
+        project_collections::create_project_collection,
+        project_collections::rename_project_collection,
+        project_collections::move_project_collection,
+        project_collections::set_project_collection_membership,
+        project_collections::remove_project_collection,
+        project_collections::transfer::import_project_collections,
         #[cfg(feature = "godot")]
         godot::launch_godot,
         #[cfg(feature = "godot")]

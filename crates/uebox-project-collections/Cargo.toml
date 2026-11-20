@@ -1,0 +1,15 @@
+[package]
+name = "uebox-project-collections"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[dependencies]
+rusqlite = { version = "0.32", features = ["bundled"] }
+tempfile = "3"
+uebox-project-library = { path = "../uebox-project-library" }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

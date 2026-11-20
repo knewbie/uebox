@@ -52,6 +52,7 @@ pub fn read_host_status() -> HostStatus {
             "settings",
             "modelSettings",
             "projectRegistration",
+            "projectCollections",
             "chatHistory",
             "legacyHistory",
         ]
@@ -60,7 +61,11 @@ pub fn read_host_status() -> HostStatus {
             id,
             available: matches!(
                 id,
-                "projectRegistration" | "chatHistory" | "legacyHistory" | "modelSettings"
+                "projectRegistration"
+                    | "projectCollections"
+                    | "chatHistory"
+                    | "legacyHistory"
+                    | "modelSettings"
             ) && cfg!(any(unix, windows)),
         })
         .collect(),

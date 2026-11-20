@@ -38,6 +38,9 @@ const chatHistoryAvailable = computed(() =>
 const legacyHistoryAvailable = computed(() =>
   status.value?.capabilities.some(({ id, available }) => id === 'legacyHistory' && available)
 )
+const projectCollectionsAvailable = computed(() =>
+  status.value?.capabilities.some(({ id, available }) => id === 'projectCollections' && available)
+)
 const settingsAvailable = computed(() =>
   status.value?.capabilities.some(({ id, available }) => id === 'modelSettings' && available)
 )
@@ -226,7 +229,10 @@ onUnmounted(() => colorScheme.removeEventListener('change', onColorSchemeChange)
           </dl>
         </section>
 
-        <ProjectLibraryPanel v-if="projectRegistrationAvailable" />
+        <ProjectLibraryPanel
+          v-if="projectRegistrationAvailable"
+          :collections-enabled="projectCollectionsAvailable === true"
+        />
         <AgentHistoryPanel v-if="chatHistoryAvailable" />
         <LegacyHistoryPanel v-if="legacyHistoryAvailable" />
         <ModelSettingsPanel v-if="settingsAvailable" />

@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import AInput from 'ant-design-vue/es/input/Input'
 import AppAlert from '@renderer/components/AppAlert.vue'
 import AppButton from '@renderer/components/AppButton.vue'
+import ProjectCollectionsPanel from './collections/ProjectCollectionsPanel.vue'
 import {
   importRegisteredProjects,
   listRegisteredProjects,
@@ -15,6 +16,7 @@ import {
 } from './commands'
 
 const { t } = useI18n()
+defineProps<{ collectionsEnabled?: boolean }>()
 const engines: readonly ProjectEngine[] = ['unreal', 'unity', 'godot']
 const engine = ref<ProjectEngine | ''>('')
 const name = ref('')
@@ -231,6 +233,7 @@ onMounted(refresh)
       </li>
     </ul>
     <p v-else-if="pending !== 'list' && !listError">{{ t('tauriPreview.projectLibrary.empty') }}</p>
+    <ProjectCollectionsPanel v-if="collectionsEnabled" :projects="projects" />
   </section>
 </template>
 
