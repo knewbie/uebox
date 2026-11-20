@@ -7,15 +7,16 @@ use uebox_engine_unity::{BridgeOptions, Target, UnityClient};
 #[derive(Default)]
 pub(crate) struct UnityQueries {
     active_ports: Arc<Mutex<HashSet<u16>>>,
+    pub(crate) agent: Arc<crate::unity_agent::UnityAgentHost>,
 }
 
-struct UnityPortReservation {
+pub(crate) struct UnityPortReservation {
     active_ports: Arc<Mutex<HashSet<u16>>>,
     port: u16,
 }
 
 impl UnityQueries {
-    fn reserve(&self, port: u16) -> Result<UnityPortReservation, String> {
+    pub(crate) fn reserve(&self, port: u16) -> Result<UnityPortReservation, String> {
         let mut active = self
             .active_ports
             .lock()
@@ -28,6 +29,13 @@ impl UnityQueries {
             port,
         })
     }
+}
+
+pub(crate) fn local_target(
+    project_root: String,
+    port: u16,
+) -> Result<Target, uebox_engine_unity::BridgeError> {
+    Target::new(SocketAddr::from((Ipv4Addr::LOCALHOST, port)), project_root)
 }
 
 impl Drop for UnityPortReservation {
@@ -80,8 +88,7 @@ pub(crate) async fn inspect_unity(
     }
 
     // The UI cannot choose a remote address and validation happens before any socket opens.
-    let address = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
-    let target = Target::new(address, project_root).map_err(|error| error.to_string())?;
+    let target = local_target(project_root, port).map_err(|error| error.to_string())?;
     let reservation = queries.reserve(port)?;
     // This one-use authorization is created only after the UI's explicit
     // takeover approval and is tied to this exact loopback target.

@@ -40,9 +40,11 @@ using an ID. Changing the UI's current selection does not retarget the binding.
 `tools()` constructs a registry containing exactly `ue_project_info`, with an
 empty object schema and `additionalProperties: false`. Even direct calls to
 `tool()` reject a different engine, project, instance, generation or nonempty
-arguments. A successful `project.info` reply is returned unchanged only after
-its `projectName` and `projectPath` match the captured UE identity. Announcement
-and reply paths are compared as text and never opened, canonicalized, or sent
+arguments. A successful `project.info` reply must match the captured project
+name and directory. The model result includes only bounded `projectName`,
+`engineVersion`, and boolean `hasCode` fields when valid. The model's
+`RunTarget` uses opaque project and instance aliases. Announcement and reply
+paths are compared as text and never opened, canonicalized, or sent
 to a blocking filesystem worker. The host must construct `ProjectIdentity` from
 a project the user has already authorized, never from a UE-provided path; that
 trusted construction may itself perform filesystem I/O.
@@ -52,7 +54,8 @@ path with one trailing `/`. On Windows, a drive path may use the approved
 canonical `\\?\C:\...` spelling or its normal `C:\...` / `C:/...` form; the
 drive letter alone is case-insensitive. An explicitly approved UNC project can
 use its corresponding canonical `\\?\UNC\...` or normal UNC spelling. A single
-trailing separator is accepted. Other path components must match exactly:
+trailing separator is accepted. Cross-namespace spellings with ambiguous
+Win32 components are rejected. Other path components must match exactly:
 symlink, junction, short-name, mapped-drive, dot-segment and unverified case
 aliases are rejected. Unrelated UNC shares, device namespaces and malformed
 extended paths are rejected without opening them. This text comparison does not
@@ -63,11 +66,10 @@ The host must retain one candidate per live UE connection and call
 `candidate.retire()` when that connection disappears or changes. Tauri should
 retain the bridge, registry, candidate, original token and binding in trusted
 backend state; a frontend-supplied ID or `RunTarget` is not proof of selection.
-UE's existing
-`SelectedInstance` also rejects stale/disconnected handles when queried, even
-if host reconciliation has not yet updated engine-core. In that lag window the
-`target_validator` can still report the old registry selection as current;
-the original UE handle, rather than a new connection lookup, rejects dispatch.
+The binding checks both the retained engine-core selection and the transport
+generation. Its Rust-only socket key stays stable across project changes on
+one socket. The host can await the exact transport generation's retirement
+and retire the candidate even while no agent run is active.
 
 The agent core maps UE/identity errors to a generic `tool_failed` result. There
 is no retry, fallback to another editor, arbitrary method, shell or write tool.
@@ -86,9 +88,8 @@ wall-clock deadline for every operation, including trusted registry lock waits.
 
 ## Limits
 
-This is an adapter boundary, not Tauri wiring or real UE acceptance. The current
-UE API has no synchronous `SelectedInstance` validity probe, per-connection
-close method, or atomic engine-core-check-and-transport-dispatch operation.
+This adapter has no per-connection close method or atomic
+engine-core-check-and-transport-dispatch operation.
 The host must keep engine-core lifecycle state synchronized; there remains a
 time-of-check/time-of-use window around a concurrently changing UE connection.
 The original handle prevents intentional re-selection, UE invalidation fails

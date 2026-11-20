@@ -63,6 +63,7 @@ pub enum BridgeError {
     UnknownInstance,
     Disconnected,
     StaleSelection,
+    Draining,
     Timeout,
     Remote {
         code: Option<i64>,
@@ -78,6 +79,7 @@ impl fmt::Display for BridgeError {
             Self::UnknownInstance => write!(f, "instance is not connected and identified"),
             Self::Disconnected => write!(f, "instance disconnected"),
             Self::StaleSelection => write!(f, "the selected project changed; select it again"),
+            Self::Draining => write!(f, "a read from the previous project is still draining"),
             Self::Timeout => write!(f, "request timed out; its outcome is unknown"),
             Self::Remote { code, message, .. } => {
                 write!(f, "UnrealAgentLink error")?;
@@ -95,12 +97,19 @@ impl Error for BridgeError {}
 
 type Reply = oneshot::Sender<Result<Value, BridgeError>>;
 
+struct PendingRequest {
+    reply: Reply,
+    generation: u64,
+    drain_on_rotation: bool,
+    dispatched: bool,
+}
+
 struct ConnectionState {
     alive: bool,
     project: Option<InstanceSummary>,
     selection_id: String,
     generation: u64,
-    pending: HashMap<String, Reply>,
+    pending: HashMap<String, PendingRequest>,
 }
 
 enum Outbound {
@@ -112,6 +121,7 @@ struct Connection {
     id: String,
     state: Mutex<ConnectionState>,
     outbound: mpsc::Sender<Outbound>,
+    changed: watch::Sender<()>,
 }
 
 #[derive(Default)]
@@ -166,8 +176,12 @@ pub struct UnrealBridge {
     shared: Arc<Shared>,
     address: SocketAddr,
     stop: watch::Sender<bool>,
-    listener_task: Option<JoinHandle<()>>,
+    listener_task: tokio::sync::Mutex<Option<JoinHandle<()>>>,
 }
+
+/// Rust-only identity of one socket, shared across its project generations.
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct SocketKey(String);
 
 /// Explicit authorization to query one identified project on one connection.
 #[derive(Clone)]
@@ -223,7 +237,7 @@ impl UnrealBridge {
             shared,
             address,
             stop,
-            listener_task: Some(listener_task),
+            listener_task: tokio::sync::Mutex::new(Some(listener_task)),
         })
     }
 
@@ -273,10 +287,12 @@ impl UnrealBridge {
     }
 
     /// Close the listener and all connections, failing outstanding requests.
-    pub async fn shutdown(mut self) {
-        let _ = self.stop.send(true);
-        if let Some(task) = self.listener_task.take() {
+    pub async fn shutdown(&self) {
+        self.stop.send_replace(true);
+        let mut listener_task = self.listener_task.lock().await;
+        if let Some(task) = listener_task.as_mut() {
             let _ = task.await;
+            listener_task.take();
         }
     }
 }
@@ -288,9 +304,41 @@ impl Drop for UnrealBridge {
 }
 
 impl SelectedInstance {
+    pub fn socket_key(&self) -> SocketKey {
+        SocketKey(self.connection.id.clone())
+    }
+
+    pub fn is_current(&self) -> bool {
+        let state = lock(&self.connection.state);
+        state.alive && state.generation == self.generation && state.project.is_some()
+    }
+
+    /// Resolves on disconnect or when the selected project generation retires.
+    pub async fn wait_until_stale(&self) {
+        let mut changed = self.connection.changed.subscribe();
+        while self.is_current() && changed.changed().await.is_ok() {}
+    }
+
     /// Query exactly the selected connection with the plugin's project.info
     /// method. Timeouts and disconnects are not retried automatically.
     pub async fn get_project_info(&self, deadline: Duration) -> Result<Value, BridgeError> {
+        self.query_project_info(deadline, false).await
+    }
+
+    /// Keep a dispatched read draining after a project change on the same
+    /// socket. The stale reply is discarded, and the original deadline applies.
+    pub async fn get_project_info_for_agent(
+        &self,
+        deadline: Duration,
+    ) -> Result<Value, BridgeError> {
+        self.query_project_info(deadline, true).await
+    }
+
+    async fn query_project_info(
+        &self,
+        deadline: Duration,
+        drain_on_rotation: bool,
+    ) -> Result<Value, BridgeError> {
         let id = format!(
             "req-{}",
             self.shared.next_request.fetch_add(1, Ordering::Relaxed)
@@ -304,7 +352,23 @@ impl SelectedInstance {
             if state.generation != self.generation || state.project.is_none() {
                 return Err(BridgeError::StaleSelection);
             }
-            state.pending.insert(id.clone(), reply);
+            // Only dispatched Agent reads can survive a generation change.
+            if state
+                .pending
+                .values()
+                .any(|request| request.generation != self.generation)
+            {
+                return Err(BridgeError::Draining);
+            }
+            state.pending.insert(
+                id.clone(),
+                PendingRequest {
+                    reply,
+                    generation: self.generation,
+                    drain_on_rotation,
+                    dispatched: false,
+                },
+            );
         }
 
         // The guard removes the waiter on timeout, cancellation, or send
@@ -334,6 +398,9 @@ impl SelectedInstance {
         })
         .await
         {
+            Ok(Ok(_)) if drain_on_rotation && !self.is_current() => {
+                Err(BridgeError::StaleSelection)
+            }
             Ok(result) => result,
             Err(_) => Err(BridgeError::Timeout),
         }
@@ -351,6 +418,15 @@ impl Drop for PendingGuard {
     }
 }
 
+fn mark_dispatched(connection: &Connection, id: &str) -> bool {
+    let mut state = lock(&connection.state);
+    let Some(request) = state.pending.get_mut(id) else {
+        return false;
+    };
+    request.dispatched = true;
+    true
+}
+
 struct ConnectionGuard {
     shared: Arc<Shared>,
     connection: Arc<Connection>,
@@ -365,6 +441,7 @@ impl Drop for ConnectionGuard {
             std::mem::take(&mut state.pending)
         };
         lock(&self.shared.connections).remove(&self.connection.id);
+        self.connection.changed.send_replace(());
         fail_pending(pending, BridgeError::Disconnected);
     }
 }
@@ -396,6 +473,7 @@ async fn handle_client(stream: TcpStream, shared: Arc<Shared>, liveness: Livenes
             pending: HashMap::new(),
         }),
         outbound,
+        changed: watch::channel(()).0,
     });
     lock(&shared.connections).insert(id.clone(), Arc::clone(&connection));
     let _guard = ConnectionGuard {
@@ -434,7 +512,7 @@ async fn handle_client(stream: TcpStream, shared: Arc<Shared>, liveness: Livenes
             let message = match command {
                 Outbound::Request { id, text } => {
                     // A queued request may have timed out or been cancelled.
-                    if !lock(&write_connection.state).pending.contains_key(&id) {
+                    if !mark_dispatched(&write_connection, &id) {
                         continue;
                     }
                     Message::Text(text.into())
@@ -565,9 +643,9 @@ fn handle_message(connection: &Arc<Connection>, text: &str) -> bool {
         (Some("evt"), Some("project.closed")) => return false,
         (Some("res"), _) => {
             if let Some(id) = message["id"].as_str() {
-                let reply = lock(&connection.state).pending.remove(id);
-                if let Some(reply) = reply {
-                    let _ = reply.send(decode_response(&message));
+                let request = lock(&connection.state).pending.remove(id);
+                if let Some(request) = request {
+                    let _ = request.reply.send(decode_response(&message));
                 }
             }
         }
@@ -592,7 +670,7 @@ fn update_project(connection: &Connection, payload: &Value) {
         _ => None,
     };
 
-    let invalidated = {
+    let (changed, invalidated) = {
         let mut state = lock(&connection.state);
         let changed = state.project.as_ref().is_some_and(|old| {
             project.as_ref().is_none_or(|(name, path, _)| {
@@ -603,7 +681,10 @@ fn update_project(connection: &Connection, payload: &Value) {
             state.generation += 1;
             // A list snapshot authorizes this identity, not the socket's next project.
             state.selection_id = format!("ue-{}", NEXT_CONNECTION.fetch_add(1, Ordering::Relaxed));
-            std::mem::take(&mut state.pending)
+            state
+                .pending
+                .extract_if(|_, request| !request.drain_on_rotation || !request.dispatched)
+                .collect()
         } else {
             HashMap::new()
         };
@@ -613,8 +694,11 @@ fn update_project(connection: &Connection, payload: &Value) {
             project_path: path.to_owned(),
             interactive,
         });
-        pending
+        (changed, pending)
     };
+    if changed {
+        connection.changed.send_replace(());
+    }
     fail_pending(invalidated, BridgeError::StaleSelection);
 }
 
@@ -653,9 +737,9 @@ fn decode_response(message: &Value) -> Result<Value, BridgeError> {
     Ok(result)
 }
 
-fn fail_pending(pending: HashMap<String, Reply>, error: BridgeError) {
-    for reply in pending.into_values() {
-        let _ = reply.send(Err(error.clone()));
+fn fail_pending(pending: HashMap<String, PendingRequest>, error: BridgeError) {
+    for request in pending.into_values() {
+        let _ = request.reply.send(Err(error.clone()));
     }
 }
 
@@ -677,9 +761,8 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 mod lifecycle_tests {
     use super::*;
 
-    #[tokio::test]
-    async fn timeout_and_cancellation_remove_pending_waiters() {
-        let (outbound, mut outgoing) = mpsc::channel(4);
+    fn selection_fixture() -> (SelectedInstance, mpsc::Receiver<Outbound>) {
+        let (outbound, outgoing) = mpsc::channel(4);
         let connection = Arc::new(Connection {
             id: "test-connection".to_owned(),
             state: Mutex::new(ConnectionState {
@@ -695,12 +778,100 @@ mod lifecycle_tests {
                 pending: HashMap::new(),
             }),
             outbound,
+            changed: watch::channel(()).0,
         });
-        let selected = SelectedInstance {
-            shared: Arc::new(Shared::default()),
-            connection: Arc::clone(&connection),
-            generation: 0,
+        (
+            SelectedInstance {
+                shared: Arc::new(Shared::default()),
+                connection,
+                generation: 0,
+            },
+            outgoing,
+        )
+    }
+
+    #[tokio::test]
+    async fn project_rotation_and_disconnect_retire_exact_generations_on_the_same_socket() {
+        let (old, _outgoing) = selection_fixture();
+        let mut retired = Box::pin(old.wait_until_stale());
+        assert!(futures_util::poll!(&mut retired).is_pending());
+        update_project(
+            &old.connection,
+            &json!({"projectName":"next","projectPath":"/next"}),
+        );
+        assert!(futures_util::poll!(&mut retired).is_ready());
+        assert!(!old.is_current());
+
+        let fresh = SelectedInstance {
+            generation: 1,
+            ..old.clone()
         };
+        assert!(old.socket_key() == fresh.socket_key());
+        assert!(fresh.is_current());
+        let mut disconnected = Box::pin(fresh.wait_until_stale());
+        assert!(futures_util::poll!(&mut disconnected).is_pending());
+        drop(ConnectionGuard {
+            shared: fresh.shared.clone(),
+            connection: fresh.connection.clone(),
+        });
+        assert!(futures_util::poll!(&mut disconnected).is_ready());
+        assert!(!fresh.is_current());
+    }
+
+    #[tokio::test]
+    async fn rotation_preserves_dispatched_agent_reads_but_drops_queued_agent_reads() {
+        let (selected, mut outgoing) = selection_fixture();
+        let draining = tokio::spawn({
+            let selected = selected.clone();
+            async move {
+                selected
+                    .get_project_info_for_agent(Duration::from_secs(2))
+                    .await
+            }
+        });
+        let Outbound::Request { id, .. } = outgoing.recv().await.unwrap() else {
+            panic!("expected project request");
+        };
+        assert!(mark_dispatched(&selected.connection, &id));
+        let queued = tokio::spawn({
+            let selected = selected.clone();
+            async move {
+                selected
+                    .get_project_info_for_agent(Duration::from_secs(2))
+                    .await
+            }
+        });
+        let Outbound::Request { id: queued_id, .. } = outgoing.recv().await.unwrap() else {
+            panic!("expected queued project request");
+        };
+        update_project(
+            &selected.connection,
+            &json!({"projectName":"next","projectPath":"/next"}),
+        );
+        assert!(!mark_dispatched(&selected.connection, &queued_id));
+        assert_eq!(queued.await.unwrap(), Err(BridgeError::StaleSelection));
+        let fresh = SelectedInstance {
+            generation: 1,
+            ..selected.clone()
+        };
+        assert_eq!(
+            fresh.get_project_info(Duration::from_secs(1)).await,
+            Err(BridgeError::Draining)
+        );
+        assert_eq!(lock(&selected.connection.state).pending.len(), 1);
+        assert!(!draining.is_finished());
+        assert!(handle_message(
+            &selected.connection,
+            &json!({"type":"res","id":id,"code":200,"result":{"projectName":"test"}}).to_string()
+        ));
+        assert_eq!(draining.await.unwrap(), Err(BridgeError::StaleSelection));
+        assert!(lock(&selected.connection.state).pending.is_empty());
+    }
+
+    #[tokio::test]
+    async fn timeout_and_cancellation_remove_pending_waiters() {
+        let (selected, mut outgoing) = selection_fixture();
+        let connection = selected.connection.clone();
 
         let timed = tokio::spawn({
             let selected = selected.clone();

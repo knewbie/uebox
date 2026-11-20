@@ -569,6 +569,397 @@ fn simultaneous_queries_cannot_open_two_connections_to_the_same_port() {
 }
 
 #[test]
+fn unity_agent_rejects_unapproved_or_unknown_targets_without_opening_a_socket() {
+    let window = window();
+    assert_eq!(
+        invoke_command(
+            &window,
+            "attach_unity_agent_target",
+            json!({"projectRoot":project(),"port":0,"allowClientTakeover":false}),
+        ),
+        Err(json!("takeover_required"))
+    );
+    assert_eq!(
+        invoke_command(
+            &window,
+            "attach_unity_agent_target",
+            json!({"projectRoot":project(),"port":0,"allowClientTakeover":true}),
+        ),
+        Err(json!("target_unavailable"))
+    );
+    assert_eq!(
+        invoke_command(
+            &window,
+            "create_unity_agent",
+            json!({"sessionId":"unknown","endpoint":"http://127.0.0.1:9/fixture","model":"fixture","credential":"synthetic"}),
+        ),
+        Err(json!("target_unavailable"))
+    );
+    assert_eq!(
+        invoke_command(
+            &window,
+            "release_unity_agent_target",
+            json!({"sessionId":"unknown"}),
+        ),
+        Err(json!("target_unavailable"))
+    );
+}
+
+fn unity_agent_model_request(stream: &mut TcpStream) -> (String, Value) {
+    use std::io::{BufRead, BufReader};
+    let mut reader = BufReader::new(stream);
+    let mut headers = String::new();
+    let mut size = None;
+    loop {
+        let mut line = String::new();
+        assert_ne!(reader.read_line(&mut line).unwrap(), 0);
+        if line == "\r\n" {
+            break;
+        }
+        if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+            size = Some(value.trim().parse::<usize>().unwrap());
+        }
+        headers.push_str(&line);
+    }
+    let mut body = vec![0; size.unwrap()];
+    reader.read_exact(&mut body).unwrap();
+    (headers, serde_json::from_slice(&body).unwrap())
+}
+
+fn unity_agent_model_reply(stream: &mut TcpStream, delta: Value, finish: &str) {
+    let event = json!({"choices":[{"index":0,"delta":delta,"finish_reason":finish}]});
+    let body = format!("data: {event}\n\ndata: [DONE]\n\n");
+    write!(
+        stream,
+        "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    )
+    .unwrap();
+}
+
+#[test]
+#[ignore = "requires a disposable Unity project and dedicated Coplay bridge port"]
+fn unity_agent_queries_a_real_disposable_editor() {
+    let project = std::path::PathBuf::from(std::env::var_os("UEBOX_TEST_UNITY_PROJECT").unwrap())
+        .canonicalize()
+        .unwrap();
+    let temporary = std::env::temp_dir().canonicalize().unwrap();
+    assert!(project.starts_with(temporary));
+    assert!(project.join("Assets/UEBoxProbe.unity").is_file());
+    let port: u16 = std::env::var("UEBOX_TEST_UNITY_PORT")
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert!(port > 0 && port != 6400);
+
+    let window = window();
+    let target = invoke_command(
+        &window,
+        "attach_unity_agent_target",
+        json!({"projectRoot":project,"port":port,"allowClientTakeover":true}),
+    )
+    .unwrap();
+    let model = listener();
+    let agent = invoke_command(
+        &window,
+        "create_unity_agent",
+        json!({"sessionId":target["sessionId"],
+            "endpoint":format!("http://{}/v1/chat/completions", model.local_addr().unwrap()),
+            "model":"fixture","credential":null}),
+    )
+    .unwrap();
+    let expected_root = project.to_str().unwrap().to_owned();
+    let provider = thread::spawn(move || {
+        let mut stream = accept(&model);
+        let (_, request) = unity_agent_model_request(&mut stream);
+        assert_eq!(request["tools"].as_array().unwrap().len(), 2);
+        unity_agent_model_reply(
+            &mut stream,
+            json!({"tool_calls":[
+                {"index":0,"id":"project","type":"function","function":{"name":"unity_project_info","arguments":"{}"}},
+                {"index":1,"id":"scene","type":"function","function":{"name":"unity_active_scene","arguments":"{}"}}
+            ]}),
+            "tool_calls",
+        );
+        let mut stream = accept(&model);
+        let (_, request) = unity_agent_model_request(&mut stream);
+        let receipts: Vec<Value> = request["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|message| message["role"] == "tool")
+            .map(|message| serde_json::from_str(message["content"].as_str().unwrap()).unwrap())
+            .collect();
+        assert_eq!(receipts.len(), 2);
+        assert!(receipts[0]["data"]["unity_version"]
+            .as_str()
+            .is_some_and(|version| !version.is_empty()));
+        assert_eq!(receipts[1]["data"]["name"], "UEBoxProbe");
+        assert_eq!(receipts[1]["data"]["path"], "Assets/UEBoxProbe.unity");
+        assert!(!request.to_string().contains(&expected_root));
+        unity_agent_model_reply(
+            &mut stream,
+            json!({"content":"Read live Unity scene"}),
+            "stop",
+        );
+    });
+    let run = invoke_command(
+        &window,
+        "start_unity_agent",
+        json!({"agentId":agent["agentId"],"text":"Read the editor project and scene"}),
+    )
+    .unwrap();
+    assert_eq!(
+        unity_agent_poll_until(&window, &run, "completed"),
+        "Read live Unity scene"
+    );
+    invoke_command(&window, "release_unity_agent_target", target).unwrap();
+    provider.join().unwrap();
+}
+
+fn unity_agent_answer_ping(stream: &mut TcpStream) {
+    let mut frame = [0; 12];
+    stream.read_exact(&mut frame).unwrap();
+    assert_eq!(&frame, b"\0\0\0\0\0\0\0\x04ping");
+    send_response(
+        stream,
+        json!({"status":"success","result":{"message":"pong"}}),
+    );
+}
+
+fn unity_agent_poll_until(
+    window: &WebviewWindow<MockRuntime>,
+    args: &Value,
+    phase: &str,
+) -> String {
+    let deadline = Instant::now() + Duration::from_secs(4);
+    let mut text = String::new();
+    loop {
+        let update = invoke_command(window, "poll_unity_agent", args.clone()).unwrap();
+        for fragment in update["fragments"].as_array().unwrap() {
+            text.push_str(fragment.as_str().unwrap());
+        }
+        if update["phase"] == phase {
+            return text;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "last Unity Agent update: {update}"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[test]
+fn unity_agent_reuses_one_socket_and_holds_the_port_until_a_cancelled_read_drains() {
+    use tauri::Manager;
+    const SECRET: &str = "synthetic-unity-agent-bearer";
+    let project = tempfile::tempdir().unwrap();
+    let root = project.path().canonicalize().unwrap();
+    let root = root.to_str().unwrap();
+    let socket = listener();
+    let port = socket.local_addr().unwrap().port();
+    let editor_root = root.to_owned();
+    let (reading_tx, reading_rx) = mpsc::channel();
+    let (finish_read_tx, finish_read_rx) = mpsc::channel();
+    let editor = thread::spawn(move || {
+        let mut stream = accept(&socket);
+        stream
+            .write_all(b"WELCOME UNITY-MCP 1 FRAMING=1\n")
+            .unwrap();
+        assert_eq!(read_request(&mut stream)["type"], "get_project_info");
+        send_response(
+            &mut stream,
+            project_response(&editor_root, "fixture-version"),
+        );
+        unity_agent_answer_ping(&mut stream);
+        assert_eq!(read_request(&mut stream)["type"], "get_project_info");
+        send_response(
+            &mut stream,
+            project_response(&editor_root, "fixture-version"),
+        );
+        unity_agent_answer_ping(&mut stream);
+        assert_eq!(read_request(&mut stream)["type"], "get_project_info");
+        reading_tx.send(()).unwrap();
+        finish_read_rx.recv_timeout(Duration::from_secs(3)).unwrap();
+        send_response(
+            &mut stream,
+            project_response(&editor_root, "fixture-version"),
+        );
+        assert_eq!(stream.read(&mut [0]).unwrap(), 0);
+        assert!(
+            matches!(socket.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock)
+        );
+        socket
+    });
+    let window = window();
+    let other = tauri::WebviewWindowBuilder::new(window.app_handle(), "other", Default::default())
+        .build()
+        .unwrap();
+    let attach_args = json!({"projectRoot":root,"port":port,"allowClientTakeover":true});
+    let attached =
+        invoke_command(&window, "attach_unity_agent_target", attach_args.clone()).unwrap();
+    let target_args = json!({"sessionId":attached["sessionId"]});
+    assert_eq!(attached.as_object().unwrap().len(), 1);
+    assert_eq!(
+        invoke_command(&other, "release_unity_agent_target", target_args.clone()),
+        Err(json!("target_unavailable"))
+    );
+    assert_eq!(
+        invoke_command(&window, "attach_unity_agent_target", attach_args.clone()),
+        Err(json!("target_busy"))
+    );
+    assert!(invoke(&window, attach_args.clone())
+        .unwrap_err()
+        .to_string()
+        .contains("already"));
+
+    let model = listener();
+    model.set_nonblocking(true).unwrap();
+    let config = json!({
+        "sessionId":attached["sessionId"],
+        "endpoint":format!("http://{}/v1/chat/completions", model.local_addr().unwrap()),
+        "model":"fixture",
+        "credential":SECRET
+    });
+    assert_eq!(
+        invoke_command(&other, "create_unity_agent", config.clone()),
+        Err(json!("target_unavailable"))
+    );
+    let created = invoke_command(&window, "create_unity_agent", config).unwrap();
+    assert!(matches!(model.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock));
+    let model_root = root.to_owned();
+    let model_worker = thread::spawn(move || {
+        for index in 0..3 {
+            let mut stream = accept(&model);
+            let (headers, request) = unity_agent_model_request(&mut stream);
+            assert!(headers
+                .to_ascii_lowercase()
+                .contains(&format!("authorization: bearer {SECRET}")));
+            assert!(!request.to_string().contains(SECRET));
+            if index == 1 {
+                let receipt = request["messages"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|message| message["role"] == "tool")
+                    .unwrap();
+                let receipt: Value =
+                    serde_json::from_str(receipt["content"].as_str().unwrap()).unwrap();
+                assert!(receipt["data"].get("project_root").is_none());
+                assert!(receipt["data"].get("assets_path").is_none());
+                assert!(!receipt.to_string().contains(&model_root));
+                assert_eq!(receipt["data"]["unity_version"], "fixture-version");
+                unity_agent_model_reply(&mut stream, json!({"content":"Fixture answer"}), "stop");
+            } else {
+                unity_agent_model_reply(
+                    &mut stream,
+                    json!({"tool_calls":[{
+                        "index":0, "id":format!("call-{index}"), "type":"function",
+                        "function":{"name":"unity_project_info","arguments":"{}"}
+                    }]}),
+                    "tool_calls",
+                );
+            }
+        }
+        model
+    });
+    let send = json!({"agentId":created["agentId"],"text":"Read selected project"});
+    let first = invoke_command(&window, "start_unity_agent", send.clone()).unwrap();
+    assert_eq!(
+        unity_agent_poll_until(&window, &first, "completed"),
+        "Fixture answer"
+    );
+    let second = invoke_command(&window, "start_unity_agent", send.clone()).unwrap();
+    reading_rx.recv_timeout(Duration::from_secs(3)).unwrap();
+    assert_eq!(
+        invoke_command(&other, "cancel_unity_agent", second.clone()),
+        Err(json!("agent_unavailable"))
+    );
+    invoke_command(&window, "cancel_unity_agent", second.clone()).unwrap();
+    assert!(unity_agent_poll_until(&window, &second, "draining").is_empty());
+    assert_eq!(
+        invoke_command(&window, "start_unity_agent", send.clone()),
+        Err(json!("agent_busy"))
+    );
+
+    let release_window = window.clone();
+    let command_args = target_args.clone();
+    let (closed_tx, closed_rx) = mpsc::channel();
+    let release = thread::spawn(move || {
+        closed_tx
+            .send(invoke_command(
+                &release_window,
+                "release_unity_agent_target",
+                command_args,
+            ))
+            .unwrap();
+    });
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        let update = invoke_command(&window, "poll_unity_agent", second.clone()).unwrap();
+        if update["error"] == "target_unavailable" {
+            break;
+        }
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert!(closed_rx.try_recv().is_err());
+    assert_eq!(
+        invoke_command(&window, "attach_unity_agent_target", attach_args.clone()),
+        Err(json!("target_busy"))
+    );
+    finish_read_tx.send(()).unwrap();
+    closed_rx
+        .recv_timeout(Duration::from_secs(3))
+        .unwrap()
+        .unwrap();
+    release.join().unwrap();
+    assert!(unity_agent_poll_until(&window, &second, "failed").is_empty());
+    assert_eq!(
+        invoke_command(&window, "start_unity_agent", send),
+        Err(json!("agent_unavailable"))
+    );
+    let model = model_worker.join().unwrap();
+    assert!(matches!(model.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock));
+    let socket = editor.join().unwrap();
+    let editor_root_for_replacement = root.to_owned();
+    let verification = thread::spawn(move || {
+        let mut stream = accept(&socket);
+        stream
+            .write_all(b"WELCOME UNITY-MCP 1 FRAMING=1\n")
+            .unwrap();
+        assert_eq!(read_request(&mut stream)["type"], "get_project_info");
+        send_response(
+            &mut stream,
+            project_response(&editor_root_for_replacement, "replacement"),
+        );
+    });
+    let replacement = invoke_command(&window, "attach_unity_agent_target", attach_args).unwrap();
+    assert_ne!(replacement["sessionId"], attached["sessionId"]);
+    verification.join().unwrap();
+    let agent = invoke_command(
+        &window,
+        "create_unity_agent",
+        json!({
+            "sessionId":replacement["sessionId"],"model":"fixture",
+            "endpoint":format!("http://{}/v1/chat/completions", model.local_addr().unwrap())
+        }),
+    )
+    .unwrap();
+    let send = json!({"agentId":agent["agentId"],"text":"Do not contact the model after EOF"});
+    assert_eq!(
+        invoke_command(&window, "start_unity_agent", send.clone()),
+        Err(json!("target_unavailable"))
+    );
+    assert_eq!(
+        invoke_command(&window, "start_unity_agent", send),
+        Err(json!("agent_unavailable"))
+    );
+    assert!(matches!(model.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock));
+}
+
+#[test]
 #[cfg(feature = "unreal")]
 fn pending_unity_query_does_not_block_unreal_listener_lifecycle() {
     let unity_socket = listener();

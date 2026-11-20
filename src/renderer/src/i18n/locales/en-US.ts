@@ -64,11 +64,11 @@ export default {
         generic: 'Unable to complete the project registration operation.'
       }
     },
-    godotAgent: {
-      title: 'Godot read-only assistant preview',
+    editorAgent: {
+      title: '{engine} read-only assistant preview',
       intro:
-        'Configure a model for this connected editor. Messages and requested project or scene data are sent to the selected service. Only two read-only Godot tools are available; the full assistant is not migrated.',
-      target: 'Godot connection ID',
+        'Messages and data read from the connected editor are sent to the model service you configure.',
+      target: '{engine} connection ID',
       endpoint: 'Full Chat Completions URL',
       model: 'Model name',
       credential: 'Bearer credential (optional, memory only)',
@@ -77,7 +77,7 @@ export default {
       message: 'Message',
       send: 'Send',
       cancel: 'Cancel',
-      unavailable: 'Connect to the Godot editor before configuring the assistant.',
+      unavailable: 'Connect to the {engine} editor before configuring the assistant.',
       error: 'Assistant operation failed',
       user: 'You',
       assistant: 'Assistant',
@@ -90,7 +90,7 @@ export default {
         failed: 'Failed'
       },
       errors: {
-        target_unavailable: 'The selected Godot connection is no longer available.',
+        target_unavailable: 'The selected {engine} connection is no longer available.',
         agent_unavailable: 'This assistant is no longer available.',
         run_unavailable: 'This response is no longer available.',
         agent_already_exists: 'This editor already has an assistant or is draining a previous one.',
@@ -106,7 +106,7 @@ export default {
         agent_context_limit: 'The chat exceeds the request size limit.',
         agent_output_buffer_limit: 'The assistant output exceeded the pending display buffer.',
         credential_unavailable: 'The in-memory credential is no longer available.',
-        generic: 'The operation failed. Check the Godot connection and model configuration.'
+        generic: 'The operation failed. Check the {engine} connection and model configuration.'
       }
     },
     godot: {
@@ -143,6 +143,7 @@ export default {
     },
     unreal: {
       title: 'Unreal Engine read-only query',
+      assistantRoot: 'Confirm the absolute project folder for the assistant',
       intro:
         'Start the local listener manually, refresh the registered instances, and select a project to read its details. No automatic selection or retries are performed.',
       trust:
@@ -184,6 +185,9 @@ export default {
       confirm:
         'I understand and allow this connection to potentially disconnect the existing client on this port',
       query: 'Read project and active scene',
+      attachAgent: 'Connect for the read-only assistant',
+      releaseAgent: 'Release assistant connection',
+      agentConnectionError: 'Could not connect or release the Unity assistant target.',
       reading: 'Reading the Unity editor…',
       error: 'Unity query failed',
       project: 'Project',

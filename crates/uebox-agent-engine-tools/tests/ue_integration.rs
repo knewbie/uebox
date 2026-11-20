@@ -210,13 +210,16 @@ async fn chosen_ue_connection_supplies_real_project_info_to_the_next_model_step(
         assert_eq!(result["ok"], true);
         assert_eq!(
             result["data"],
-            json!({"projectName":"A","projectPath":expected_path,"engineVersion":"5.4.3","fixtureValue":17})
+            json!({"projectName":"A","engineVersion":"5.4.3","hasCode":true})
         );
         assert_eq!(result["target"]["engine"], "unreal");
         assert_eq!(result["target"]["project"], target.project());
+        assert_ne!(result["target"]["project"], expected_path);
         assert_eq!(result["target"]["instance"], target.instance());
         assert!(result["target"]["instance"].as_str().unwrap() != ue_selection_credential);
         assert_eq!(result["target"]["generation"], target.generation());
+        assert!(!body.to_string().contains(&expected_path));
+        assert!(!body.to_string().contains("private-engine-path"));
         http_response(&mut second, "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"UE 5.4.3\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n").await;
     });
     let provider = OpenAiProvider::new(ProviderConfig::new(
@@ -240,7 +243,7 @@ async fn chosen_ue_connection_supplies_real_project_info_to_the_next_model_step(
             .await
             .is_err()
     );
-    editor_a.send(Message::Text(json!({"ver":"1.0","type":"res","id":request["id"],"code":200,"result":{"projectName":"A","projectPath":path_a,"engineVersion":"5.4.3","fixtureValue":17}}).to_string().into())).await.unwrap();
+    editor_a.send(Message::Text(json!({"ver":"1.0","type":"res","id":request["id"],"code":200,"result":{"projectName":"A","projectPath":path_a,"engineVersion":"5.4.3","hasCode":true,"engineDir":"/private-engine-path","fixtureValue":17}}).to_string().into())).await.unwrap();
     assert_eq!(run.await.unwrap().unwrap().text, "UE 5.4.3");
     server.await.unwrap();
 }
@@ -379,6 +382,8 @@ async fn project_change_on_selected_socket_fails_inflight_and_invalidates_bindin
     fixture.editor.send(Message::Text(json!({"type":"evt","method":"project.info","payload":{"projectName":"B","projectPath":next_dir.to_str().unwrap(),"interactive":true}}).to_string().into())).await.unwrap();
     let changed = wait_summary(&fixture.bridge, "B").await;
     assert_ne!(changed.connection_id, fixture.summary.connection_id);
+    assert!(!pending.is_finished());
+    fixture.editor.send(Message::Text(json!({"type":"res","id":request["id"],"code":200,"result":{"projectName":"A","projectPath":fixture.path}}).to_string().into())).await.unwrap();
     assert!(pending.await.unwrap().is_err());
     assert!(fixture
         .binding

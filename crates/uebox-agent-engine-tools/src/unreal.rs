@@ -12,7 +12,7 @@ use uebox_agent_core::{
 use uebox_engine_core::{
     ConnectionToken, EditorSelection, EngineKind, EngineRegistry, InteractionMode, ProjectIdentity,
 };
-use uebox_engine_unreal::{InstanceSummary, SelectedInstance, UnrealBridge};
+use uebox_engine_unreal::{InstanceSummary, SelectedInstance, SocketKey, UnrealBridge};
 
 static NEXT_PUBLIC_INSTANCE: AtomicU64 = AtomicU64::new(0);
 
@@ -205,6 +205,7 @@ struct Candidate {
     summary: InstanceSummary,
     token: ConnectionToken,
     public_instance: String,
+    public_project: String,
 }
 
 /// A backend-owned candidate displayed to the user. The UE selection credential
@@ -279,6 +280,7 @@ impl UnrealCandidate {
                 summary: summary.clone(),
                 token,
                 public_instance,
+                public_project: format!("ue-project-{sequence}"),
             }),
         })
     }
@@ -310,13 +312,7 @@ struct Binding {
 
 impl Binding {
     fn current(&self, target: &RunTarget) -> bool {
-        if target != &self.target
-            || target.engine() != Engine::Unreal
-            || self.selection.project().engine() != EngineKind::Unreal
-            || self.selection.project().root().to_str() != Some(target.project())
-            || self.selection.instance_id() != target.instance()
-            || self.selection.generation() != target.generation()
-        {
+        if target != &self.target || !self.selected.is_current() {
             return false;
         }
         self.candidate
@@ -378,11 +374,7 @@ impl UnrealProjectInfoBinding {
         }
         let target = RunTarget::new(
             Engine::Unreal,
-            candidate
-                .project
-                .root()
-                .to_str()
-                .ok_or(BindError::Unavailable)?,
+            &candidate.public_project,
             selection.instance_id(),
             selection.generation(),
         )
@@ -402,6 +394,15 @@ impl UnrealProjectInfoBinding {
 
     pub fn target(&self) -> &RunTarget {
         &self.inner.target
+    }
+    pub fn socket_key(&self) -> SocketKey {
+        self.inner.selected.socket_key()
+    }
+    pub fn is_current(&self) -> bool {
+        self.inner.current(&self.inner.target)
+    }
+    pub async fn wait_until_stale(&self) {
+        self.inner.selected.wait_until_stale().await;
     }
     pub fn tools(&self) -> Result<ToolRegistry, Error> {
         if !self.inner.current(&self.inner.target) {
@@ -442,7 +443,7 @@ impl ReadOnlyTool for ProjectInfoTool {
             }
             let result = inner
                 .selected
-                .get_project_info(inner.deadline)
+                .get_project_info_for_agent(inner.deadline)
                 .await
                 .map_err(|_| ToolError)?;
             if !inner.current(&target) {
@@ -460,9 +461,44 @@ impl ReadOnlyTool for ProjectInfoTool {
             if !project_path_matches(inner.selection.project(), path) || !inner.current(&target) {
                 return Err(ToolError);
             }
-            Ok(result)
+            Ok(public_project_info(&result))
         })
     }
+}
+
+fn public_project_info(result: &Value) -> Value {
+    let mut output = serde_json::Map::new();
+    // Even allowlisted string fields must not serve as arbitrary path payloads.
+    for (field, punctuation) in [("projectName", " _-."), ("engineVersion", ".-+")] {
+        if let Some(value) = result.get(field).and_then(Value::as_str).filter(|value| {
+            !value.is_empty()
+                && value.len() <= 128
+                && value
+                    .chars()
+                    .all(|c| c.is_alphanumeric() || punctuation.contains(c))
+        }) {
+            output.insert(field.into(), json!(value));
+        }
+    }
+    if let Some(has_code) = result.get("hasCode").and_then(Value::as_bool) {
+        output.insert("hasCode".into(), json!(has_code));
+    }
+    Value::Object(output)
+}
+
+#[cfg(test)]
+#[test]
+fn public_receipt_discards_paths_even_in_allowlisted_text_fields() {
+    assert_eq!(
+        public_project_info(&json!({
+            "projectName": "C:\\fixture\\project",
+            "engineVersion": "/fixture/engine",
+            "projectPath": "/fixture/project",
+            "anythingElse": "private",
+            "hasCode": false
+        })),
+        json!({"hasCode": false})
+    );
 }
 
 #[cfg(test)]

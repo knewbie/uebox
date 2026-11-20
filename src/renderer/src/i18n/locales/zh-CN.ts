@@ -60,11 +60,10 @@ export default {
         generic: '无法完成项目登记操作。'
       }
     },
-    godotAgent: {
-      title: 'Godot 只读助手预览',
-      intro:
-        '为当前已连接的编辑器配置模型。消息和请求读取的项目或场景数据会发送到所选服务。目前仅支持两个 Godot 只读工具，完整助手尚未迁移。',
-      target: 'Godot 连接 ID',
+    editorAgent: {
+      title: '{engine} 只读助手预览',
+      intro: '消息和从已连接编辑器读取的数据会发送到你配置的模型服务。',
+      target: '{engine} 连接 ID',
       endpoint: '完整的 Chat Completions 地址',
       model: '模型名称',
       credential: 'Bearer 凭据（可选，仅保存在内存）',
@@ -73,7 +72,7 @@ export default {
       message: '消息',
       send: '发送',
       cancel: '取消',
-      unavailable: '请先连接 Godot 编辑器，再配置助手。',
+      unavailable: '请先连接 {engine} 编辑器，再配置助手。',
       error: '助手操作失败',
       user: '你',
       assistant: '助手',
@@ -86,7 +85,7 @@ export default {
         failed: '失败'
       },
       errors: {
-        target_unavailable: '所选 Godot 连接已不可用。',
+        target_unavailable: '所选 {engine} 连接已不可用。',
         agent_unavailable: '此助手已不可用。',
         run_unavailable: '此轮回复已不可用。',
         agent_already_exists: '此编辑器已有助手，或上一次操作仍在等待结束。',
@@ -102,7 +101,7 @@ export default {
         agent_context_limit: '对话已超出请求大小限制。',
         agent_output_buffer_limit: '助手输出超出了待显示缓冲区的大小限制。',
         credential_unavailable: '内存中的凭据已不可用。',
-        generic: '操作失败，请检查 Godot 连接和模型配置。'
+        generic: '操作失败，请检查 {engine} 连接和模型配置。'
       }
     },
     godot: {
@@ -139,6 +138,7 @@ export default {
     },
     unreal: {
       title: 'Unreal Engine 只读查询',
+      assistantRoot: '确认助手要读取的项目目录绝对路径',
       intro:
         '手动启动本地监听，刷新已登记实例并选择一个项目后，可读取项目详情。不会自动选择或重试。',
       trust: '本地连接不验证插件身份；其他本机进程也可能连接或冒充插件。',
@@ -176,6 +176,9 @@ export default {
       portHint: '请输入 1 到 65535 之间的端口，系统不会自动选择端口。',
       confirm: '我了解并允许本次连接可能挤掉该端口上的现有客户端',
       query: '读取项目和活动场景',
+      attachAgent: '连接到只读助手',
+      releaseAgent: '释放助手连接',
+      agentConnectionError: '无法连接或释放 Unity 助手目标。',
       reading: '正在读取 Unity 编辑器…',
       error: 'Unity 查询失败',
       project: '项目',

@@ -1,10 +1,13 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AInput from 'ant-design-vue/es/input/Input'
 import AppAlert from '@renderer/components/AppAlert.vue'
 import AppButton from '@renderer/components/AppButton.vue'
 import AppCheckbox from '@renderer/components/AppCheckbox.vue'
+import EditorAgentPanel from '../../agent/AgentPanel.vue'
+import { isAbsoluteProjectPath } from '../projectPath'
+import { attachUnityAgentTarget, releaseUnityAgentTarget } from './agentTarget'
 import { inspectUnity, type UnityInspection } from './commands'
 
 const props = defineProps<{ os: string | null }>()
@@ -15,18 +18,12 @@ const unityTakeoverAllowed = ref(false)
 const unityLoading = ref(false)
 const unityError = ref<string | null>(null)
 const unityResult = ref<UnityInspection | null>(null)
+const agentTarget = ref<{ sessionId: string } | null>(null)
+const targetChanging = ref(false)
+const targetError = ref(false)
+let unmounted = false
 
-const validUnityProject = computed(() => {
-  const path = unityProject.value
-  if (props.os === null || path.includes('\0')) return false
-  if (props.os === 'windows') {
-    const normalized = path.replace(/\\/g, '/')
-    return (
-      /^(?:[a-zA-Z]:\/|\/\/[^/]+\/[^/]+)/.test(normalized) && !normalized.split('/').includes('..')
-    )
-  }
-  return path.startsWith('/') && !path.split('/').includes('..')
-})
+const validUnityProject = computed(() => isAbsoluteProjectPath(unityProject.value, props.os))
 const validUnityPort = computed(() => {
   if (!/^\d{1,5}$/.test(unityPort.value)) return false
   const port = Number(unityPort.value)
@@ -37,7 +34,10 @@ const canQueryUnity = computed(
     validUnityProject.value &&
     validUnityPort.value &&
     unityTakeoverAllowed.value &&
-    !unityLoading.value
+    !inputLocked.value
+)
+const inputLocked = computed(
+  () => unityLoading.value || targetChanging.value || Boolean(agentTarget.value)
 )
 
 watch(
@@ -46,6 +46,7 @@ watch(
     unityTakeoverAllowed.value = false
     unityResult.value = null
     unityError.value = null
+    targetError.value = false
   },
   { flush: 'sync' }
 )
@@ -68,6 +69,57 @@ async function queryUnity(): Promise<void> {
     unityLoading.value = false
   }
 }
+
+async function attachAgent(): Promise<void> {
+  if (!canQueryUnity.value) return
+  targetChanging.value = true
+  targetError.value = false
+  unityError.value = null
+  unityResult.value = null
+  try {
+    const attached = await attachUnityAgentTarget(
+      unityProject.value,
+      Number(unityPort.value),
+      unityTakeoverAllowed.value
+    )
+    if (unmounted) {
+      await releaseUnityAgentTarget(attached.sessionId)
+      return
+    }
+    agentTarget.value = attached
+  } catch {
+    targetError.value = true
+  } finally {
+    unityTakeoverAllowed.value = false
+    targetChanging.value = false
+  }
+}
+
+async function releaseAgent(): Promise<void> {
+  if (!agentTarget.value || targetChanging.value) return
+  const { sessionId } = agentTarget.value
+  targetChanging.value = true
+  targetError.value = false
+  try {
+    await releaseUnityAgentTarget(sessionId)
+    agentTarget.value = null
+  } catch (error) {
+    if (error === 'target_unavailable') {
+      agentTarget.value = null
+    } else {
+      targetError.value = true
+    }
+  } finally {
+    targetChanging.value = false
+  }
+}
+
+onUnmounted(() => {
+  unmounted = true
+  if (agentTarget.value && !targetChanging.value) {
+    void releaseUnityAgentTarget(agentTarget.value.sessionId).catch(() => {})
+  }
+})
 </script>
 
 <template>
@@ -89,7 +141,7 @@ async function queryUnity(): Promise<void> {
         v-model:value="unityProject"
         name="unity-project"
         autocomplete="off"
-        :disabled="unityLoading"
+        :disabled="inputLocked"
       />
       <label for="unity-port">{{ t('tauriPreview.unity.port') }}</label>
       <AInput
@@ -99,10 +151,10 @@ async function queryUnity(): Promise<void> {
         inputmode="numeric"
         autocomplete="off"
         aria-describedby="unity-port-hint"
-        :disabled="unityLoading"
+        :disabled="inputLocked"
       />
       <p id="unity-port-hint" class="unity-hint">{{ t('tauriPreview.unity.portHint') }}</p>
-      <AppCheckbox v-model:checked="unityTakeoverAllowed" :disabled="unityLoading">
+      <AppCheckbox v-model:checked="unityTakeoverAllowed" :disabled="inputLocked">
         {{ t('tauriPreview.unity.confirm') }}
       </AppCheckbox>
       <AppButton
@@ -113,6 +165,22 @@ async function queryUnity(): Promise<void> {
         :loading="unityLoading"
         >{{ t('tauriPreview.unity.query') }}</AppButton
       >
+      <AppButton
+        v-if="!agentTarget"
+        data-unity-attach-agent
+        :disabled="!canQueryUnity"
+        :loading="targetChanging"
+        @click="attachAgent"
+        >{{ t('tauriPreview.unity.attachAgent') }}</AppButton
+      >
+      <AppButton
+        v-else
+        data-unity-release-agent
+        :disabled="targetChanging"
+        :loading="targetChanging"
+        @click="releaseAgent"
+        >{{ t('tauriPreview.unity.releaseAgent') }}</AppButton
+      >
     </form>
     <p v-if="unityLoading" role="status">{{ t('tauriPreview.unity.reading') }}</p>
     <AppAlert
@@ -121,6 +189,18 @@ async function queryUnity(): Promise<void> {
       show-icon
       :message="t('tauriPreview.unity.error')"
       :description="unityError"
+    />
+    <AppAlert
+      v-if="targetError"
+      type="error"
+      show-icon
+      :message="t('tauriPreview.unity.agentConnectionError')"
+    />
+    <EditorAgentPanel
+      v-if="agentTarget"
+      engine="unity"
+      :target="targetChanging ? null : agentTarget"
+      :target-label="agentTarget.sessionId"
     />
     <div v-if="unityResult" class="unity-result" data-unity-result>
       <h3>{{ t('tauriPreview.unity.project') }}</h3>

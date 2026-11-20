@@ -1,15 +1,17 @@
 # Tauri migration preview / Tauri 迁移预览
 
 This is a separate preview entry. It does not implement the Electron bridge. A limited
-Unity project and active-scene query, an Unreal project query, and a Godot
-preview with a read-only assistant are available only after explicit user actions.
+Unity project and active-scene query, an Unreal project query, and Godot editor
+queries are available after explicit user actions. Each engine has a fixed-target
+read-only assistant preview.
 Use the Electron application for existing features.
 Its identifier is separate so it does not use the Electron application's webview
 preferences. Node is used only to build/serve the frontend during development;
 the application backend and commands run in the Tauri Rust process.
 
 这是独立的迁移预览入口，不实现 Electron 桥；只有用户主动操作才会执行有限的 Unity
-项目和活动场景查询、Unreal 项目只读查询，以及带只读助手的 Godot 预览。现有功能请继续使用
+项目和活动场景查询、Unreal 项目只读查询以及 Godot 编辑器查询。三种引擎各有绑定固定目标
+的只读助手预览。现有功能请继续使用
 Electron 版本。预览版使用独立标识，不读取 Electron 的 WebView 偏好设置。Node 只在
 开发时构建或提供前端文件，应用后端和命令运行在 Tauri 的 Rust 进程内。
 
@@ -84,6 +86,44 @@ the full libraries feature.
 能力列表。`engineModules` 表示编译进当前宿主的适配器。进程与平台字段由 Rust
 读取。`projectRegistration` 表示手工登记预览，独立于引擎编译选项。`libraries`
 表示完整项目库和资料库的迁移状态。
+
+### Unreal and Unity assistants / UE 与 Unity 助手
+
+For Unreal, select an interactive listener connection and confirm the absolute
+project directory. For Unity, explicitly approve takeover and choose the dedicated
+assistant connection action. It holds one local socket and reserves the selected
+port until the connection closes and admitted I/O drains. The existing one-shot
+Unity query uses the same port reservation. Reconnecting requires fresh approval.
+
+The model address, name, and optional credential are set for each assistant.
+The host retires its target on disconnect or project change. Model-facing tool
+results use opaque target identifiers and omit the absolute project directory.
+The local bridge trust limits below also apply to the assistants.
+
+UE 助手需要选择交互实例并确认工程目录绝对路径。Unity 助手需要明确同意接管，并选择
+专用连接操作。它持有一个本机连接，直到连接关闭且已派发的读取完成才释放端口。原有
+Unity 单次查询共用端口占用约束。重新连接需要重新授权。
+
+每个助手单独配置模型地址、名称和可选凭据。断线或切换工程时，宿主退役该目标。
+面向模型的工具结果使用不透明标识并省略工程目录绝对路径。下述本机协议的信任边界
+同样适用于助手。
+
+An opt-in Unity test reads an actual temporary editor project through Coplay
+and passes the project and scene receipts into a loopback model fixture. Start
+the disposable project's bridge on a dedicated port and open the
+`Assets/UEBoxProbe.unity` scene first. The test refuses port 6400 and paths
+outside the system temporary directory.
+
+真实 Unity 测试通过 Coplay 读取临时编辑器工程，并将项目与场景回执送到环回模型夹具。
+请先在独立端口启动临时工程的桥并打开 `Assets/UEBoxProbe.unity`。用例会拒绝 6400 端口
+及系统临时目录以外的工程路径。
+
+```sh
+UEBOX_TEST_UNITY_PROJECT=/absolute/temporary/project UEBOX_TEST_UNITY_PORT=54830 \
+  cargo test --locked --manifest-path src-tauri/Cargo.toml --no-default-features \
+  --features unity --test unity_command unity_agent_queries_a_real_disposable_editor \
+  -- --ignored --exact
+```
 
 ### Project registrations / 项目登记
 

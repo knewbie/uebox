@@ -47,12 +47,12 @@ error, because it may belong to a different client or project.
 Use `run_target()` for the pinned Agent identity, `tool_registry()` for the
 two tool declarations, and `validator()` for `AgentSession::new`. The declared
 functions are `unity_project_info` and `unity_active_scene`; both accept only
-an empty JSON object. Agent core adds engine, canonical project, instance and
-generation to each model-facing receipt. Only known read-only project or scene
-fields are returned; raw replies, credentials and raw error text are not.
-The host must not put a credential in an instance ID or project name. Read-only
-project and scene fields are sent to the configured model service and may
-themselves contain user-authored content.
+an empty JSON object. Agent core adds the engine, per-connection project and
+instance aliases, and generation to each model-facing receipt. Absolute
+project and asset directory fields and the host's internal instance ID stay
+in the binding. Read-only project and scene fields sent to the configured
+service may contain user-authored content. Raw replies, credential fields and
+raw bridge errors are omitted.
 
 Both tools use the same owned client. Each dispatch checks all four target
 fields, revalidates the exact selection and token before and after I/O, and
@@ -83,14 +83,14 @@ on that connection after cancellation. Bridge socket timeouts do not bound a
 worker waiting for the registry lock, and cancellation does not forcibly
 interrupt a blocked worker.
 
-**Runtime shutdown changes that guarantee:** shutting down the owning Tokio
-runtime can drop the asynchronous task, clear core's `Draining` phase and
-release its gate while blocking I/O is still running. The host must not reuse
-the same port or physical editor instance for a replacement connection until
-the old blocking I/O has actually finished. This crate does not currently
-provide a completion signal independent of the runtime; if completion cannot
-be established after shutdown, keep that port and instance quarantined. It
-cannot prevent other code or processes from opening connections.
+Hosts with an exclusive port reservation pass it to
+`new_with_socket_guard`. The reservation drops after the transport closes,
+including when a blocking worker outlives the asynchronous task during runtime
+shutdown. `close().await` retires the exact token first and then waits for the
+worker to release the socket before returning. `probe().await` uses a framed
+ping on the same socket, returns `Busy` instead of queueing, and retires the
+binding on failure. `is_retired()` reports terminal binding state without
+performing I/O. The reservation only coordinates cooperating code in the host.
 
 A bridge error closes the owned client and retires its exact token; the caller
 receives a generic failure. Core can return `TargetChanged` before sending a

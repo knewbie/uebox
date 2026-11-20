@@ -108,6 +108,35 @@ fn unity_command_is_registered_only_when_its_module_is_compiled() {
 }
 
 #[test]
+fn unreal_and_unity_assistant_commands_follow_their_own_engine_features() {
+    let window = window();
+    for (feature_enabled, command, parameters, expected_error) in [
+        (
+            cfg!(feature = "unreal"),
+            "create_unreal_agent",
+            json!({"connectionId":"missing","projectRoot":"relative","endpoint":"http://127.0.0.1:9/fixture","model":"fixture","credential":null}),
+            "target_unavailable",
+        ),
+        (
+            cfg!(feature = "unity"),
+            "attach_unity_agent_target",
+            json!({"projectRoot":"relative","port":1,"allowClientTakeover":false}),
+            "takeover_required",
+        ),
+    ] {
+        let error = invoke(&window, command, parameters)
+            .expect_err("these requests lack a valid target and authorization")
+            .to_string();
+        let expected = if feature_enabled {
+            expected_error
+        } else {
+            "not found"
+        };
+        assert!(error.contains(expected), "{command}: {error}");
+    }
+}
+
+#[test]
 fn unreal_commands_are_registered_only_when_their_module_is_compiled() {
     let window = window();
     for (command, body) in [
@@ -133,33 +162,38 @@ fn unreal_commands_are_registered_only_when_their_module_is_compiled() {
 
 #[test]
 fn single_engine_dependency_graph_excludes_other_engines() {
-    let cases: [(&str, &str, &[&str]); 3] = [
+    let cases: [(&str, [&str; 2], &[&str]); 3] = [
         (
             "unity",
-            "uebox-engine-unity ",
+            ["uebox-engine-unity ", "uebox-agent-unity-tools "],
             &[
                 "uebox-engine-unreal ",
                 "uebox-godot-session ",
                 "uebox-engine-godot ",
-                "uebox-agent-core ",
+                "uebox-agent-engine-tools ",
                 "uebox-agent-godot-tools ",
             ],
         ),
         (
             "unreal",
-            "uebox-engine-unreal ",
+            ["uebox-engine-unreal ", "uebox-agent-engine-tools "],
             &[
                 "uebox-engine-unity ",
                 "uebox-godot-session ",
                 "uebox-engine-godot ",
-                "uebox-agent-core ",
+                "uebox-agent-unity-tools ",
                 "uebox-agent-godot-tools ",
             ],
         ),
         (
             "godot",
-            "uebox-godot-session ",
-            &["uebox-engine-unity ", "uebox-engine-unreal "],
+            ["uebox-godot-session ", "uebox-agent-godot-tools "],
+            &[
+                "uebox-engine-unity ",
+                "uebox-engine-unreal ",
+                "uebox-agent-unity-tools ",
+                "uebox-agent-engine-tools ",
+            ],
         ),
     ];
     for (feature, included, excluded) in cases {
@@ -186,10 +220,12 @@ fn single_engine_dependency_graph_excludes_other_engines() {
             String::from_utf8_lossy(&output.stderr)
         );
         let tree = String::from_utf8(output.stdout).unwrap();
-        assert!(
-            tree.lines().any(|line| line.starts_with(included)),
-            "{tree}"
-        );
+        for required in included {
+            assert!(
+                tree.lines().any(|line| line.starts_with(required)),
+                "{tree}"
+            );
+        }
         if feature == "godot" {
             assert!(
                 tree.lines()

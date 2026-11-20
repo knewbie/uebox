@@ -49,12 +49,27 @@ pub struct UnityTools {
     inner: Arc<Binding>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProbeState {
+    Ready,
+    Busy,
+    Closed,
+}
+
+// Field drop order keeps the host reservation until after the socket closes.
+struct BoundClient {
+    client: UnityClient,
+    _socket_guard: Box<dyn Send>,
+}
+
+type ClientSlot = Arc<tokio::sync::Mutex<Option<BoundClient>>>;
+
 struct Binding {
     target: RunTarget,
     registry: Arc<Mutex<EngineRegistry>>,
     selection: EditorSelection,
     token: ConnectionToken,
-    client: Arc<tokio::sync::Mutex<Option<UnityClient>>>,
+    client: ClientSlot,
     usable: AtomicBool,
 }
 
@@ -69,13 +84,28 @@ impl UnityTools {
         selection: EditorSelection,
         token: ConnectionToken,
     ) -> Result<Self, BindError> {
+        Self::new_with_socket_guard(client, registry, selection, token, ()).await
+    }
+
+    /// Transfer a host reservation to the socket and its blocking workers.
+    pub async fn new_with_socket_guard(
+        client: UnityClient,
+        registry: Arc<Mutex<EngineRegistry>>,
+        selection: EditorSelection,
+        token: ConnectionToken,
+        socket_guard: impl Send + 'static,
+    ) -> Result<Self, BindError> {
+        let client = BoundClient {
+            client,
+            _socket_guard: Box::new(socket_guard),
+        };
         tokio::task::spawn_blocking(move || Self::bind(client, registry, selection, token))
             .await
             .map_err(|_| BindError::WorkerFailed)?
     }
 
     fn bind(
-        client: UnityClient,
+        client: BoundClient,
         registry: Arc<Mutex<EngineRegistry>>,
         selection: EditorSelection,
         token: ConnectionToken,
@@ -86,34 +116,36 @@ impl UnityTools {
             return Err(BindError::InvalidSelection);
         }
         // Only the caller-selected path is resolved, never a path from the peer.
-        let actual =
-            ProjectIdentity::new(EngineKind::Unity, &client.target().expected_project_root)
-                .map_err(|_| BindError::ProjectMismatch)?;
+        let actual = ProjectIdentity::new(
+            EngineKind::Unity,
+            &client.client.target().expected_project_root,
+        )
+        .map_err(|_| BindError::ProjectMismatch)?;
         if &actual != selection.project()
             || !reported_project_matches(
-                client.last_observed_project_info().project_root.as_str(),
+                client
+                    .client
+                    .last_observed_project_info()
+                    .project_root
+                    .as_str(),
                 selection.project(),
             )
         {
             return Err(BindError::ProjectMismatch);
         }
-        let project = selection
-            .project()
-            .root()
-            .to_str()
-            .ok_or(BindError::InvalidSelection)?;
+        let generation = selection.generation();
         let target = RunTarget::new(
             Engine::Unity,
-            project,
-            selection.instance_id(),
-            selection.generation(),
+            format!("unity-project-{generation}"),
+            format!("unity-instance-{generation}"),
+            generation,
         )
         .map_err(|_| BindError::InvalidSelection)?;
 
         let registry_guard = registry
             .lock()
             .map_err(|_| BindError::RegistryUnavailable)?;
-        if !selection_matches(&registry_guard, &selection, &token, &target) {
+        if !selection_matches(&registry_guard, &selection, &token) {
             return Err(BindError::InvalidSelection);
         }
         let mut claims = CONNECTION_CLAIMS
@@ -139,6 +171,50 @@ impl UnityTools {
 
     pub fn run_target(&self) -> RunTarget {
         self.inner.target.clone()
+    }
+
+    /// Terminal state is monotonic; a live socket still needs a successful probe or read.
+    pub fn is_retired(&self) -> bool {
+        !self.inner.usable.load(Ordering::Acquire)
+    }
+
+    /// Probe this socket without queueing behind a blocking read or opening another connection.
+    pub async fn probe(&self) -> ProbeState {
+        if self.is_retired() {
+            return ProbeState::Closed;
+        }
+        let Ok(mut slot) = self.inner.client.clone().try_lock_owned() else {
+            return ProbeState::Busy;
+        };
+        let binding = self.inner.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            let ready = binding.current_on_worker(&binding.target)
+                && slot
+                    .as_mut()
+                    .is_some_and(|owned| owned.client.ping().is_ok())
+                && binding.current_on_worker(&binding.target);
+            if ready {
+                ProbeState::Ready
+            } else {
+                binding.retire();
+                slot.take();
+                ProbeState::Closed
+            }
+        })
+        .await;
+        match result {
+            Ok(state) => state,
+            Err(_) => {
+                self.close().await;
+                ProbeState::Closed
+            }
+        }
+    }
+
+    /// Retire before waiting. The reservation stays with the actual socket until it closes.
+    pub async fn close(&self) {
+        self.inner.retire();
+        self.inner.client.lock().await.take();
     }
 
     /// Construct the only two supported tool declarations for this target.
@@ -274,13 +350,8 @@ fn selection_matches(
     registry: &EngineRegistry,
     selection: &EditorSelection,
     token: &ConnectionToken,
-    target: &RunTarget,
 ) -> bool {
     if selection.project().engine() != EngineKind::Unity
-        || target.engine() != Engine::Unity
-        || selection.project().root().to_str() != Some(target.project())
-        || selection.instance_id() != target.instance()
-        || selection.generation() != target.generation()
         || token.generation() != selection.generation()
     {
         return false;
@@ -307,7 +378,7 @@ impl Binding {
         let Ok(registry) = self.registry.try_lock() else {
             return false;
         };
-        let current = selection_matches(&registry, &self.selection, &self.token, target);
+        let current = selection_matches(&registry, &self.selection, &self.token);
         drop(registry);
         if !current && self.usable.swap(false, Ordering::AcqRel) {
             // A stale binding must not keep its original socket alive merely
@@ -326,9 +397,10 @@ impl Binding {
         if &self.target != target || !self.usable.load(Ordering::Acquire) {
             return false;
         }
-        self.registry.lock().ok().is_some_and(|registry| {
-            selection_matches(&registry, &self.selection, &self.token, target)
-        })
+        self.registry
+            .lock()
+            .ok()
+            .is_some_and(|registry| selection_matches(&registry, &self.selection, &self.token))
     }
 
     fn retire(&self) {
@@ -379,11 +451,7 @@ impl Drop for Binding {
     }
 }
 
-fn defer_cleanup(
-    client: Arc<tokio::sync::Mutex<Option<UnityClient>>>,
-    registry: Arc<Mutex<EngineRegistry>>,
-    token: ConnectionToken,
-) {
+fn defer_cleanup(client: ClientSlot, registry: Arc<Mutex<EngineRegistry>>, token: ConnectionToken) {
     let _ = std::thread::Builder::new()
         .name("unity-token-cleanup".into())
         .spawn(move || {
@@ -471,7 +539,7 @@ impl ReadOnlyTool for UnityRead {
                     if !worker_inner.current_on_worker(&target) {
                         return Err(ToolError);
                     }
-                    let bridge = client.as_mut().ok_or(ToolError)?;
+                    let bridge = &mut client.as_mut().ok_or(ToolError)?.client;
                     let value = match operation {
                         Operation::Project => {
                             let project = bridge.project_info().map_err(|_| ToolError)?;
@@ -481,8 +549,7 @@ impl ReadOnlyTool for UnityRead {
                             ) {
                                 return Err(ToolError);
                             }
-                            json!({"project_root":project.project_root,"project_name":project.project_name,
-                                "unity_version":project.unity_version,"assets_path":project.assets_path,
+                            json!({"project_name":project.project_name,"unity_version":project.unity_version,
                                 "platform":project.platform,"render_pipeline":project.render_pipeline})
                         }
                         Operation::Scene => {
@@ -517,8 +584,8 @@ impl ReadOnlyTool for UnityRead {
                 let result = match result {
                     Ok(Ok(value)) => Ok(value),
                     _ => {
-                        client.take();
                         worker_inner.retire();
+                        client.take();
                         Err(ToolError)
                     }
                 };

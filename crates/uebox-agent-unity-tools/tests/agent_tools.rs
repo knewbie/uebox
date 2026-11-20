@@ -10,7 +10,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use uebox_agent_core::{
     AgentSession, Engine, Error, OpenAiProvider, ProviderConfig, RunPhase, RunTarget,
 };
-use uebox_agent_unity_tools::UnityTools;
+use uebox_agent_unity_tools::{ProbeState, UnityTools};
 use uebox_engine_core::{
     ConnectionToken, EditorSelection, EngineKind, EngineRegistry, ProjectIdentity,
 };
@@ -729,6 +729,7 @@ async fn dropping_a_binding_while_the_registry_is_locked_never_deadlocks() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn sse_tool_calls_return_live_unity_receipts_to_the_next_model_step() {
     let project = TestProject::new();
+    let private_root = project.text();
     let (client, editor) = start_editor(&project, |mut stream, root| {
         assert_project_request(&mut stream);
         write_frame(&mut stream, project_reply(&root, "Live Project"));
@@ -789,6 +790,16 @@ async fn sse_tool_calls_return_live_unity_receipts_to_the_next_model_step() {
             serde_json::from_str(messages[2]["content"].as_str().unwrap()).unwrap();
         let scene_result: Value =
             serde_json::from_str(messages[3]["content"].as_str().unwrap()).unwrap();
+        for receipt in [&project_result, &scene_result] {
+            let contents = receipt.to_string();
+            assert!(!contents.contains(&private_root));
+            assert_ne!(receipt["target"]["project"], private_root.as_str());
+            assert!(!contents.contains("fixture-editor"));
+            assert!(!contents.contains(SECRET));
+        }
+        assert!(project_result["data"].get("project_root").is_none());
+        assert!(project_result["data"].get("assets_path").is_none());
+        assert_eq!(scene_result["data"]["path"], "Assets/Live.unity");
         assert_eq!(project_result["ok"], true);
         assert_eq!(project_result["target"], expected_target);
         assert_eq!(project_result["data"]["project_name"], "Live Project");
@@ -814,6 +825,79 @@ async fn sse_tool_calls_return_live_unity_receipts_to_the_next_model_step() {
     assert_eq!(answer.text, "Observed live scene");
     model_task.await.unwrap();
     editor.join().unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn close_retires_immediately_but_keeps_the_socket_guard_until_an_admitted_read_finishes() {
+    struct SocketGuard(std::sync::mpsc::Sender<()>);
+    impl Drop for SocketGuard {
+        fn drop(&mut self) {
+            let _ = self.0.send(());
+        }
+    }
+
+    let project = TestProject::new();
+    let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let (dropped_tx, dropped_rx) = std::sync::mpsc::channel();
+    let (client, editor) = start_editor(&project, move |mut stream, root| {
+        assert_project_request(&mut stream);
+        started_tx.send(()).unwrap();
+        release_rx.recv_timeout(Duration::from_secs(3)).unwrap();
+        write_frame(&mut stream, project_reply(&root, "Late reply"));
+        assert_eq!(stream.read(&mut [0]).unwrap(), 0);
+    });
+    let (registry, token, selection) = selection(&project);
+    let tools = UnityTools::new_with_socket_guard(
+        client,
+        registry.clone(),
+        selection,
+        token.clone(),
+        SocketGuard(dropped_tx),
+    )
+    .await
+    .unwrap();
+    let target = tools.run_target();
+    let work = tokio::spawn(tools.project_info_tool().execute(target.clone(), json!({})));
+    started_rx.await.unwrap();
+    assert_eq!(tools.probe().await, ProbeState::Busy);
+
+    let mut close = Box::pin(tools.close());
+    assert!(tokio::time::timeout(Duration::from_millis(50), &mut close)
+        .await
+        .is_err());
+    assert!(!(tools.validator())(&target));
+    assert_eq!(tools.probe().await, ProbeState::Closed);
+    assert!(dropped_rx.try_recv().is_err());
+    release_tx.send(()).unwrap();
+    assert!(work.await.unwrap().is_err());
+    close.await;
+    dropped_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+    assert!(!registry.lock().unwrap().close_connection(&token));
+    editor.join().unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn probe_uses_the_existing_connection_and_retires_it_on_eof() {
+    let project = TestProject::new();
+    let (client, editor) = start_editor(&project, |mut stream, _| {
+        let mut request = [0; 12];
+        stream.read_exact(&mut request).unwrap();
+        assert_eq!(&request, b"\0\0\0\0\0\0\0\x04ping");
+        write_frame(
+            &mut stream,
+            json!({"status":"success","result":{"message":"pong"}}),
+        );
+    });
+    let (registry, token, selection) = selection(&project);
+    let tools = UnityTools::new(client, registry, selection, token)
+        .await
+        .unwrap();
+    assert_eq!(tools.probe().await, ProbeState::Ready);
+    editor.join().unwrap();
+    assert_eq!(tools.probe().await, ProbeState::Closed);
+    assert!(tools.is_retired());
+    assert!(!(tools.validator())(&tools.run_target()));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

@@ -71,9 +71,87 @@ const unrealInstance = {
 beforeEach(() => {
   localStorage.clear()
   vi.resetAllMocks()
+  vi.mocked(invoke).mockResolvedValue(undefined)
 })
 
 describe('Tauri migration preview', () => {
+  it('opens a Unity assistant target only after an explicit takeover', async () => {
+    vi.mocked(getHostStatus).mockResolvedValue(actualHostStatus)
+    vi.mocked(invoke).mockResolvedValueOnce({ sessionId: 'unity-target-1' })
+    const wrapper = mount(App, { global: { plugins: [createAppI18n('en-US')] } })
+    await flushPromises()
+
+    await wrapper.get('input[name="unity-project"]').setValue('/tmp/Unity fixture')
+    await wrapper.get('input[name="unity-port"]').setValue('55234')
+    expect(wrapper.get('[data-unity-attach-agent]').attributes('disabled')).toBeDefined()
+    expect(invoke).not.toHaveBeenCalled()
+    await wrapper.get('button[role="checkbox"]').trigger('click')
+    await wrapper.get('[data-unity-attach-agent]').trigger('click')
+    await flushPromises()
+    expect(invoke).toHaveBeenCalledExactlyOnceWith('attach_unity_agent_target', {
+      projectRoot: '/tmp/Unity fixture',
+      port: 55234,
+      allowClientTakeover: true
+    })
+    expect(wrapper.text()).toContain('unity-target-1')
+    expect(wrapper.get('[data-unity-query]').attributes('disabled')).toBeDefined()
+    wrapper.unmount()
+    expect(invoke).toHaveBeenLastCalledWith('release_unity_agent_target', {
+      sessionId: 'unity-target-1'
+    })
+  })
+
+  it('passes an explicitly entered Unreal root and selected connection to the assistant', async () => {
+    vi.mocked(getHostStatus).mockResolvedValue(actualHostStatus)
+    vi.mocked(startUnrealListener).mockResolvedValue({ address: '127.0.0.1', port: 17860 })
+    vi.mocked(listUnrealInstances).mockResolvedValue([unrealInstance])
+    vi.mocked(invoke).mockResolvedValueOnce({ agentId: 'unreal-agent-1' })
+    const wrapper = mount(App, { global: { plugins: [createAppI18n('en-US')] } })
+    await flushPromises()
+    await wrapper.get('[data-unreal-start]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-unreal-select="ue-test-first"]').trigger('click')
+
+    expect(wrapper.find('[data-agent-create]').exists()).toBe(false)
+    await wrapper.get('input[name="unreal-agent-project"]').setValue('/fixture')
+    await wrapper
+      .get('input[name="agent-endpoint"]')
+      .setValue('http://127.0.0.1:5555/v1/chat/completions')
+    await wrapper.get('input[name="agent-model"]').setValue('fixture-model')
+    await wrapper.get('#unreal-heading ~ .agent form').trigger('submit')
+    await flushPromises()
+    expect(invoke).toHaveBeenCalledExactlyOnceWith('create_unreal_agent', {
+      connectionId: 'ue-test-first',
+      projectRoot: '/fixture',
+      endpoint: 'http://127.0.0.1:5555/v1/chat/completions',
+      model: 'fixture-model',
+      credential: null
+    })
+    wrapper.unmount()
+  })
+
+  it('lets Unity connect again after the previous target has already disconnected', async () => {
+    vi.mocked(getHostStatus).mockResolvedValue(actualHostStatus)
+    vi.mocked(invoke)
+      .mockResolvedValueOnce({ sessionId: 'unity-target-1' })
+      .mockRejectedValueOnce('target_unavailable')
+    const wrapper = mount(App, { global: { plugins: [createAppI18n('en-US')] } })
+    await flushPromises()
+
+    await wrapper.get('input[name="unity-project"]').setValue('/tmp/Unity fixture')
+    await wrapper.get('input[name="unity-port"]').setValue('55234')
+    await wrapper.get('button[role="checkbox"]').trigger('click')
+    await wrapper.get('[data-unity-attach-agent]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-unity-release-agent]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain('unity-target-1')
+    expect(wrapper.get('input[name="unity-port"]').attributes('disabled')).toBeUndefined()
+    expect(wrapper.get('[data-unity-attach-agent]').attributes('disabled')).toBeDefined()
+    wrapper.unmount()
+  })
+
   it('keeps both shared preview namespaces aligned', () => {
     const leafKeys = (value: Record<string, unknown>, prefix = ''): string[] =>
       Object.entries(value).flatMap(([key, item]) => {

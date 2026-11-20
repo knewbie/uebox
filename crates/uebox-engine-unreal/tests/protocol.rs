@@ -418,7 +418,7 @@ async fn project_change_invalidates_selection_and_outstanding_queries() {
 
 #[tokio::test]
 async fn shutdown_fails_pending_queries_and_releases_the_listener() {
-    let bridge = UnrealBridge::bind(0).await.unwrap();
+    let bridge = std::sync::Arc::new(UnrealBridge::bind(0).await.unwrap());
     let addr = bridge.local_addr();
     let mut client = connect(addr, None).await;
     announce(&mut client, "Demo", "/demo", None).await;
@@ -429,7 +429,9 @@ async fn shutdown_fails_pending_queries_and_releases_the_listener() {
     let pending =
         tokio::spawn(async move { selected.get_project_info(Duration::from_secs(10)).await });
     let _request = next_request(&mut client).await;
-    bridge.shutdown().await;
+    let second_owner = bridge.clone();
+    tokio::join!(bridge.shutdown(), second_owner.shutdown());
+    assert!(second_owner.instances().is_empty());
     assert!(matches!(
         tokio::time::timeout(Duration::from_secs(1), pending)
             .await

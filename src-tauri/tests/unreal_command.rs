@@ -2,6 +2,7 @@
 
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{Ipv4Addr, TcpListener};
 use std::sync::mpsc;
 use std::thread;
@@ -47,14 +48,8 @@ fn temporary_port() -> u16 {
 }
 
 enum EditorCommand {
-    Announce {
-        name: &'static str,
-        path: &'static str,
-    },
-    Reply {
-        id: String,
-        result: Value,
-    },
+    Announce { name: String, path: String },
+    Reply { id: String, result: Value },
     Close,
 }
 
@@ -118,9 +113,12 @@ impl EditorFixture {
         }
     }
 
-    fn announce(&self, name: &'static str, path: &'static str) {
+    fn announce(&self, name: &str, path: &str) {
         self.commands
-            .send(EditorCommand::Announce { name, path })
+            .send(EditorCommand::Announce {
+                name: name.into(),
+                path: path.into(),
+            })
             .unwrap();
     }
 
@@ -494,4 +492,275 @@ fn timeout_is_reported_without_retrying_the_query() {
         .is_err());
     query.join().unwrap();
     invoke(&window, "stop_unreal_listener", json!({})).unwrap();
+}
+
+const REQUEST_UE_PROJECT_INFO: &str = concat!(
+    "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"ue-info\",\"type\":\"function\",\"function\":{\"name\":\"ue_project_info\",\"arguments\":\"{}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n",
+    "data: [DONE]\n\n"
+);
+
+fn model_step(listener: &TcpListener, sse: &str) -> Value {
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let mut stream = loop {
+        match listener.accept() {
+            Ok((stream, _)) => break stream,
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                assert!(Instant::now() < deadline, "model request never arrived");
+                thread::sleep(Duration::from_millis(10));
+            }
+            Err(error) => panic!("model accept failed: {error}"),
+        }
+    };
+    stream
+        .set_read_timeout(Some(Duration::from_secs(3)))
+        .unwrap();
+    stream
+        .set_write_timeout(Some(Duration::from_secs(3)))
+        .unwrap();
+    let mut reader = BufReader::new(&mut stream);
+    let mut length = None;
+    loop {
+        let mut line = String::new();
+        assert_ne!(reader.read_line(&mut line).unwrap(), 0);
+        if line == "\r\n" {
+            break;
+        }
+        if let Some((name, value)) = line.split_once(':') {
+            if name.eq_ignore_ascii_case("content-length") {
+                length = Some(value.trim().parse::<usize>().unwrap());
+            }
+        }
+    }
+    let mut bytes = vec![0; length.unwrap()];
+    reader.read_exact(&mut bytes).unwrap();
+    write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{sse}", sse.len()).unwrap();
+    serde_json::from_slice(&bytes).unwrap()
+}
+
+fn create_unreal_agent_fixture(
+    window: &WebviewWindow<MockRuntime>,
+    connection_id: &Value,
+    root: &str,
+    endpoint: &str,
+) -> Result<Value, Value> {
+    invoke(
+        window,
+        "create_unreal_agent",
+        json!({
+            "connectionId":connection_id, "projectRoot":root,
+            "endpoint":endpoint, "model":"fixture-model", "credential":"fixture-secret"
+        }),
+    )
+}
+
+fn await_unreal_agent_phase(
+    window: &WebviewWindow<MockRuntime>,
+    run: &Value,
+    expected: &str,
+) -> Value {
+    let deadline = Instant::now() + Duration::from_secs(4);
+    loop {
+        let update = invoke(window, "poll_unreal_agent", run.clone()).unwrap();
+        if update["phase"] == expected {
+            return update;
+        }
+        assert!(
+            Instant::now() < deadline
+                && !matches!(
+                    update["phase"].as_str(),
+                    Some("failed" | "completed" | "cancelled")
+                ),
+            "expected {expected}: {update}"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[test]
+fn unreal_agent_refuses_a_relative_project_root_without_echoing_input() {
+    let error = create_unreal_agent_fixture(
+        &window(),
+        &json!("no-connection"),
+        "relative-fixture-path",
+        "http://127.0.0.1:1/never-called",
+    )
+    .unwrap_err();
+    assert_eq!(error, "target_unavailable");
+}
+
+#[test]
+fn unreal_agent_filters_model_output_and_holds_cancelled_instance_until_read_drains() {
+    let window = window();
+    let port = temporary_port();
+    invoke(&window, "start_unreal_listener", json!({"port":port})).unwrap();
+    let editor = EditorFixture::connect(port);
+    let other_editor = EditorFixture::connect(port);
+    let root = tempfile::tempdir().unwrap();
+    let root = root.path().canonicalize().unwrap();
+    let root = root.to_str().unwrap();
+    editor.announce("AgentFixture", root);
+    other_editor.announce("OtherFixture", root);
+    let connection = await_instances(&window, Some("AgentFixture"))
+        .into_iter()
+        .find(|item| item["project_name"] == "AgentFixture")
+        .unwrap()["connection_id"]
+        .clone();
+    let model = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    model.set_nonblocking(true).unwrap();
+    let endpoint = format!("http://{}/completions", model.local_addr().unwrap());
+    let agent = create_unreal_agent_fixture(&window, &connection, root, &endpoint).unwrap();
+    assert_eq!(
+        create_unreal_agent_fixture(&window, &connection, root, &endpoint).unwrap_err(),
+        "agent_already_exists"
+    );
+    let agent_id = &agent["agentId"];
+    let run = invoke(
+        &window,
+        "start_unreal_agent",
+        json!({"agentId":agent_id,"text":"version?"}),
+    )
+    .unwrap();
+    assert_eq!(
+        model_step(&model, REQUEST_UE_PROJECT_INFO)["tools"][0]["function"]["name"],
+        "ue_project_info"
+    );
+    let request = editor.next_request();
+    assert_eq!(request["method"], "project.info");
+    assert_eq!(request["params"], json!({}));
+    editor.reply(
+        &request,
+        json!({
+            "projectName":"AgentFixture", "projectPath":root, "engineVersion":"5.4.3",
+            "engineDir":"/private-fixture-engine", "hasCode":true
+        }),
+    );
+    let body = model_step(&model, concat!(
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"UE 5.4.3\"},\"finish_reason\":\"stop\"}]}\n\n",
+        "data: [DONE]\n\n"
+    ));
+    let tool = body["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|message| message["role"] == "tool")
+        .unwrap();
+    let result: Value = serde_json::from_str(tool["content"].as_str().unwrap()).unwrap();
+    assert_eq!(
+        result["data"],
+        json!({"projectName":"AgentFixture","engineVersion":"5.4.3","hasCode":true})
+    );
+    assert_ne!(result["target"]["project"], root);
+    assert_ne!(result["target"]["instance"], connection);
+    assert!(!tool["content"]
+        .as_str()
+        .unwrap()
+        .contains("private-fixture-engine"));
+    await_unreal_agent_phase(&window, &run, "completed");
+
+    let run = invoke(
+        &window,
+        "start_unreal_agent",
+        json!({"agentId":agent_id,"text":"version again?"}),
+    )
+    .unwrap();
+    model_step(&model, REQUEST_UE_PROJECT_INFO);
+    let request = editor.next_request();
+    invoke(&window, "cancel_unreal_agent", run.clone()).unwrap();
+    await_unreal_agent_phase(&window, &run, "draining");
+    assert_eq!(
+        invoke(
+            &window,
+            "start_unreal_agent",
+            json!({"agentId":agent_id,"text":"overlap"})
+        )
+        .unwrap_err(),
+        "agent_busy"
+    );
+    editor.reply(
+        &request,
+        json!({"projectName":"AgentFixture", "projectPath":root, "engineVersion":"late"}),
+    );
+    let terminal = await_unreal_agent_phase(&window, &run, "cancelled");
+    assert_eq!(terminal["fragments"], json!([]));
+    assert!(matches!(model.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock));
+    assert!(other_editor.requests.try_recv().is_err());
+
+    let run = invoke(
+        &window,
+        "start_unreal_agent",
+        json!({"agentId":agent_id,"text":"check before rotation"}),
+    )
+    .unwrap();
+    model_step(&model, REQUEST_UE_PROJECT_INFO);
+    let request = editor.next_request();
+    editor.announce("RotatedFixture", root);
+    let rotated = await_instances(&window, Some("RotatedFixture"))
+        .into_iter()
+        .find(|item| item["project_name"] == "RotatedFixture")
+        .unwrap()["connection_id"]
+        .clone();
+    assert_ne!(rotated, connection);
+    await_unreal_agent_phase(&window, &run, "draining");
+    assert_eq!(
+        create_unreal_agent_fixture(&window, &rotated, root, &endpoint).unwrap_err(),
+        "agent_already_exists"
+    );
+    assert!(invoke(
+        &window,
+        "query_unreal_project",
+        json!({"connectionId":rotated})
+    )
+    .unwrap_err()
+    .as_str()
+    .unwrap()
+    .contains("still draining"));
+    assert_eq!(
+        create_unreal_agent_fixture(&window, &connection, root, &endpoint).unwrap_err(),
+        "target_unavailable"
+    );
+    editor.reply(
+        &request,
+        json!({"projectName":"AgentFixture","projectPath":root}),
+    );
+    assert_eq!(
+        await_unreal_agent_phase(&window, &run, "failed")["error"],
+        "target_unavailable"
+    );
+    let fresh = create_unreal_agent_fixture(&window, &rotated, root, &endpoint).unwrap();
+    drop(editor);
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        let instances = await_instances(&window, Some("OtherFixture"));
+        if instances
+            .iter()
+            .all(|instance| instance["connection_id"] != rotated)
+        {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "rotated socket did not disconnect"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+    let replacement = EditorFixture::connect(port);
+    replacement.announce("ReconnectedFixture", root);
+    let reconnected = await_instances(&window, Some("ReconnectedFixture"))
+        .into_iter()
+        .find(|item| item["project_name"] == "ReconnectedFixture")
+        .unwrap()["connection_id"]
+        .clone();
+    assert_ne!(reconnected, rotated);
+    assert_eq!(
+        create_unreal_agent_fixture(&window, &rotated, root, &endpoint).unwrap_err(),
+        "target_unavailable"
+    );
+    let replacement_agent =
+        create_unreal_agent_fixture(&window, &reconnected, root, &endpoint).unwrap();
+    assert_ne!(replacement_agent["agentId"], fresh["agentId"]);
+    invoke(&window, "stop_unreal_listener", json!({})).unwrap();
+    assert_eq!(
+        create_unreal_agent_fixture(&window, &reconnected, root, &endpoint).unwrap_err(),
+        "target_unavailable"
+    );
 }

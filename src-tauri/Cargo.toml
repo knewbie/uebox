@@ -33,6 +33,8 @@ uebox-engine-unreal = { path = "../crates/uebox-engine-unreal", optional = true 
 uebox-godot-session = { path = "../crates/uebox-godot-session", optional = true }
 uebox-engine-core = { path = "../crates/uebox-engine-core", optional = true }
 uebox-agent-core = { path = "../crates/uebox-agent-core", optional = true }
+uebox-agent-engine-tools = { path = "../crates/uebox-agent-engine-tools", optional = true, default-features = false }
+uebox-agent-unity-tools = { path = "../crates/uebox-agent-unity-tools", optional = true }
 uebox-agent-godot-tools = { path = "../crates/uebox-agent-godot-tools", optional = true }
 getrandom = { version = "0.2", optional = true }
 tokio = { version = "1", features = ["rt", "time"], optional = true }
@@ -46,8 +48,8 @@ tokio-tungstenite = "0.26"
 
 [features]
 default = ["unity", "unreal", "godot"]
-unity = ["dep:uebox-engine-unity"]
-unreal = ["dep:uebox-engine-unreal"]
+unity = ["dep:uebox-engine-unity", "dep:uebox-engine-core", "dep:uebox-agent-core", "dep:uebox-agent-unity-tools", "dep:getrandom", "dep:tokio"]
+unreal = ["dep:uebox-engine-unreal", "dep:uebox-engine-core", "dep:uebox-agent-core", "uebox-agent-engine-tools/unreal", "dep:getrandom", "dep:tokio"]
 godot = ["dep:uebox-godot-session", "dep:uebox-engine-core", "dep:uebox-agent-core", "dep:uebox-agent-godot-tools", "dep:getrandom", "dep:tokio"]
 godot-real-editor-test = ["godot"]
 custom-protocol = ["tauri/custom-protocol"]

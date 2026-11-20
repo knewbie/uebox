@@ -4410,6 +4410,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "uebox-agent-engine-tools"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "tokio",
+ "uebox-agent-core",
+ "uebox-engine-core",
+ "uebox-engine-unreal",
+]
+
+[[package]]
 name = "uebox-agent-godot-tools"
 version = "0.1.0"
 dependencies = [
@@ -4418,6 +4429,17 @@ dependencies = [
  "uebox-agent-core",
  "uebox-engine-core",
  "uebox-godot-session",
+]
+
+[[package]]
+name = "uebox-agent-unity-tools"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "tokio",
+ "uebox-agent-core",
+ "uebox-engine-core",
+ "uebox-engine-unity",
 ]
 
 [[package]]
@@ -4481,7 +4503,9 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "uebox-agent-core",
+ "uebox-agent-engine-tools",
  "uebox-agent-godot-tools",
+ "uebox-agent-unity-tools",
  "uebox-engine-core",
  "uebox-engine-unity",
  "uebox-engine-unreal",

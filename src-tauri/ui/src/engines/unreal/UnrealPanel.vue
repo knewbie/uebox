@@ -4,6 +4,8 @@ import { useI18n } from 'vue-i18n'
 import AInput from 'ant-design-vue/es/input/Input'
 import AppAlert from '@renderer/components/AppAlert.vue'
 import AppButton from '@renderer/components/AppButton.vue'
+import EditorAgentPanel from '../../agent/AgentPanel.vue'
+import { isAbsoluteProjectPath } from '../projectPath'
 import {
   startUnrealListener,
   stopUnrealListener,
@@ -13,12 +15,13 @@ import {
   type UnrealInstance
 } from './commands'
 
-const props = defineProps<{ hostReady: boolean }>()
+const props = defineProps<{ hostReady: boolean; os?: string | null }>()
 const { t } = useI18n()
 const unrealPort = ref('17860')
 const unrealListener = ref<UnrealListenerInfo | null>(null)
 const unrealInstances = ref<UnrealInstance[]>([])
 const unrealSelected = ref<string | null>(null)
+const agentProjectRoot = ref('')
 const unrealResult = ref<Record<string, unknown> | null>(null)
 const unrealError = ref<string | null>(null)
 const unrealSelectionLost = ref(false)
@@ -43,6 +46,19 @@ const canQueryUnreal = computed(
     !unrealQuerying.value
 )
 
+const interactiveSelection = computed(() =>
+  unrealInstances.value.some(
+    (instance) => instance.connection_id === unrealSelected.value && instance.interactive
+  )
+)
+const agentTarget = computed(() =>
+  unrealSelected.value &&
+  interactiveSelection.value &&
+  isAbsoluteProjectPath(agentProjectRoot.value, props.os ?? null)
+    ? { connectionId: unrealSelected.value, projectRoot: agentProjectRoot.value }
+    : null
+)
+
 async function refreshUnreal(): Promise<void> {
   if (
     !unrealListener.value ||
@@ -63,6 +79,7 @@ async function refreshUnreal(): Promise<void> {
       !instances.some((item) => item.connection_id === unrealSelected.value)
     ) {
       unrealSelected.value = null
+      agentProjectRoot.value = ''
       unrealResult.value = null
       unrealSelectionLost.value = true
     }
@@ -98,6 +115,7 @@ function selectUnreal(connectionId: string): void {
   )
     return
   if (!unrealInstances.value.some((item) => item.connection_id === connectionId)) return
+  if (unrealSelected.value !== connectionId) agentProjectRoot.value = ''
   unrealSelected.value = connectionId
   unrealResult.value = null
   unrealError.value = null
@@ -118,6 +136,7 @@ async function queryUnreal(): Promise<void> {
     if (epoch === unrealEpoch) {
       unrealError.value = String(error)
       unrealSelected.value = null
+      agentProjectRoot.value = ''
       unrealSelectionLost.value = false
     }
   } finally {
@@ -132,6 +151,7 @@ async function stopUnreal(): Promise<void> {
   unrealRefreshing.value = false
   unrealQuerying.value = false
   unrealSelected.value = null
+  agentProjectRoot.value = ''
   unrealResult.value = null
   unrealSelectionLost.value = false
   unrealError.value = null
@@ -257,6 +277,21 @@ async function stopUnreal(): Promise<void> {
         <h3>{{ t('tauriPreview.unreal.result') }}</h3>
         <pre>{{ JSON.stringify(unrealResult, null, 2) }}</pre>
       </div>
+      <div v-if="interactiveSelection" class="unreal-controls">
+        <label for="unreal-agent-project">{{ t('tauriPreview.unreal.assistantRoot') }}</label>
+        <AInput
+          id="unreal-agent-project"
+          v-model:value="agentProjectRoot"
+          name="unreal-agent-project"
+          autocomplete="off"
+        />
+      </div>
+      <EditorAgentPanel
+        v-if="agentTarget"
+        engine="unreal"
+        :target="agentTarget"
+        :target-label="agentTarget.connectionId"
+      />
     </template>
   </section>
 </template>

@@ -6,8 +6,12 @@ mod host;
 mod project_library;
 #[cfg(feature = "unity")]
 mod unity;
+#[cfg(feature = "unity")]
+mod unity_agent;
 #[cfg(feature = "unreal")]
 mod unreal;
+#[cfg(feature = "unreal")]
+mod unreal_agent;
 
 pub use host::{read_host_status, Capability, EngineModules, HostStatus};
 
@@ -49,6 +53,20 @@ pub fn configure_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> taur
         godot_agent::close_godot_agent,
         #[cfg(feature = "unity")]
         unity::inspect_unity,
+        #[cfg(feature = "unity")]
+        unity_agent::attach_unity_agent_target,
+        #[cfg(feature = "unity")]
+        unity_agent::release_unity_agent_target,
+        #[cfg(feature = "unity")]
+        unity_agent::create_unity_agent,
+        #[cfg(feature = "unity")]
+        unity_agent::start_unity_agent,
+        #[cfg(feature = "unity")]
+        unity_agent::poll_unity_agent,
+        #[cfg(feature = "unity")]
+        unity_agent::cancel_unity_agent,
+        #[cfg(feature = "unity")]
+        unity_agent::close_unity_agent,
         #[cfg(feature = "unreal")]
         unreal::start_unreal_listener,
         #[cfg(feature = "unreal")]
@@ -56,7 +74,17 @@ pub fn configure_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> taur
         #[cfg(feature = "unreal")]
         unreal::query_unreal_project,
         #[cfg(feature = "unreal")]
-        unreal::stop_unreal_listener
+        unreal::stop_unreal_listener,
+        #[cfg(feature = "unreal")]
+        unreal_agent::create_unreal_agent,
+        #[cfg(feature = "unreal")]
+        unreal_agent::start_unreal_agent,
+        #[cfg(feature = "unreal")]
+        unreal_agent::poll_unreal_agent,
+        #[cfg(feature = "unreal")]
+        unreal_agent::cancel_unreal_agent,
+        #[cfg(feature = "unreal")]
+        unreal_agent::close_unreal_agent
     ])
 }
 

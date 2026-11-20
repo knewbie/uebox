@@ -197,6 +197,7 @@ onUnmounted(() => colorScheme.removeEventListener('change', onColorSchemeChange)
         <UnrealPanel
           v-if="!status || status.engineModules?.unreal === true"
           :host-ready="status?.engineModules?.unreal === true"
+          :os="status?.os ?? null"
         />
         <section v-else class="panel" data-engine-unavailable="unreal">
           <h2>{{ t('tauriPreview.unreal.title') }}</h2>
