@@ -216,6 +216,7 @@ export default {
       }
     },
     modelSettings: {
+      cliModelId: 'CLI 模型 ID',
       title: '模型设置',
       open: '打开模型设置',
       close: '关闭模型设置',
@@ -437,11 +438,14 @@ export default {
     nativeCli: {
       title: '原生 CLI',
       intro: '为当前系统用户启动原生 CLI 只读入口。命令只能查询已经连接的编辑器。',
-      endpoint: '将此目录用于 CLI 的 --endpoint 参数。',
+      endpoint: '将此地址用于 CLI 的 --endpoint 参数。',
+      allowAsk: '允许 CLI 将问题和编辑器读取结果发送给已配置的助手模型',
+      askEnabled: '命令行问答已启用，将使用配置的助手模型。',
       start: '启动 CLI 入口',
       stop: '停止 CLI 入口',
       errors: {
-        native_cli_endpoint_busy: '已有本机套接字占用该入口。',
+        native_cli_endpoint_busy: '已有进程占用该入口。',
+        native_cli_restart_required: '请停止入口后再更改问答权限。',
         native_cli_endpoint_invalid: '本机入口或目录未通过归属校验。',
         generic: '无法启动或停止原生 CLI 入口。'
       }

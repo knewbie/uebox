@@ -6,6 +6,11 @@ mod disk;
 #[cfg(test)]
 mod tests;
 pub(crate) mod transfer;
+#[cfg(all(
+    any(feature = "unreal", feature = "unity", feature = "godot"),
+    any(target_os = "macos", target_os = "linux", windows)
+))]
+pub(crate) use agent_model::{resolve_cli_model, validate_cli_model};
 #[cfg(any(feature = "unreal", feature = "unity", feature = "godot"))]
 pub(crate) use agent_model::{AgentModel, AgentModelSource};
 
@@ -27,7 +32,7 @@ const MISSING_CREDENTIAL: &str = "credential_unavailable";
 pub(crate) struct ModelSettings {
     credentials: Arc<CredentialStore>,
     #[cfg(test)]
-    test_data_dir: Option<std::path::PathBuf>,
+    test_data_dir: Arc<std::sync::OnceLock<std::path::PathBuf>>,
     #[cfg(any(feature = "unreal", feature = "unity", feature = "godot"))]
     active_credentials: Arc<agent_model::ActiveCredentials>,
 }
@@ -37,7 +42,7 @@ impl Default for ModelSettings {
         Self {
             credentials: Arc::new(CredentialStore::native()),
             #[cfg(test)]
-            test_data_dir: None,
+            test_data_dir: Default::default(),
             #[cfg(any(feature = "unreal", feature = "unity", feature = "godot"))]
             active_credentials: Default::default(),
         }
@@ -47,7 +52,7 @@ impl Default for ModelSettings {
 impl ModelSettings {
     fn data_dir<R: Runtime>(&self, app: &AppHandle<R>) -> Result<std::path::PathBuf, &'static str> {
         #[cfg(test)]
-        if let Some(path) = &self.test_data_dir {
+        if let Some(path) = self.test_data_dir.get() {
             return Ok(path.clone());
         }
         app.path().app_local_data_dir().map_err(|_| UNAVAILABLE)
@@ -82,6 +87,35 @@ impl ModelSettings {
         #[cfg(not(any(feature = "unreal", feature = "unity", feature = "godot")))]
         let _ = id;
     }
+}
+
+#[cfg(all(test, unix, feature = "unreal"))]
+pub(crate) async fn cli_test_profile<R: Runtime>(
+    app: AppHandle<R>,
+    root: std::path::PathBuf,
+    endpoint: String,
+) -> String {
+    app.state::<ModelSettings>()
+        .test_data_dir
+        .set(root)
+        .unwrap();
+    let stored = save_model_profile(
+        app.clone(),
+        ProfileUpdate {
+            id: None,
+            title: "CLI fixture".into(),
+            endpoint,
+            model: "model-fixture".into(),
+            authorization: AuthorizationUpdate::None,
+        },
+    )
+    .await
+    .unwrap();
+    let id = stored.catalog.profiles[0].id.clone();
+    bind_model_profile(app, Purpose::Agent, Some(id.clone()))
+        .await
+        .unwrap();
+    id
 }
 
 fn generate_id() -> Result<String, &'static str> {

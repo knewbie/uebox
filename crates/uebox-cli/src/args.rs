@@ -1,6 +1,6 @@
 use std::{collections::HashMap, path::PathBuf, time::Duration};
 
-use crate::{output::Fault, ReadTool};
+use crate::{output::Fault, ReadTool, MAX_ASK_QUESTION_BYTES};
 
 pub(crate) const DEFAULT_TIMEOUT_SECONDS: u64 = 120;
 
@@ -19,6 +19,11 @@ pub(crate) enum Command {
         tool: ReadTool,
         project: Option<PathBuf>,
         input: Arguments,
+    },
+    Ask {
+        model_profile_id: String,
+        project: Option<PathBuf>,
+        question: String,
     },
 }
 
@@ -66,6 +71,7 @@ pub(crate) fn parse(argv: &[String]) -> Result<Options, Fault> {
                         | "--project"
                         | "--search"
                         | "--name"
+                        | "--model"
                         | "--args"
                         | "--args-file"
                 ) {
@@ -111,6 +117,7 @@ pub(crate) fn parse(argv: &[String]) -> Result<Options, Fault> {
         let project = values.remove("--project").map(PathBuf::from);
         let search = values.remove("--search").map(str::to_owned);
         let named = values.remove("--name");
+        let model = values.remove("--model");
         let input = match (values.remove("--args"), values.remove("--args-file")) {
             (Some(_), Some(_)) => return Err(Fault::InvalidArgument),
             (Some(json), None) => Arguments::Inline(json.into()),
@@ -119,21 +126,39 @@ pub(crate) fn parse(argv: &[String]) -> Result<Options, Fault> {
         };
         let empty = matches!(input, Arguments::Empty);
         match words.as_slice() {
-            ["help"] if project.is_none() && search.is_none() && named.is_none() && empty => {
+            ["help"]
+                if project.is_none()
+                    && search.is_none()
+                    && named.is_none()
+                    && model.is_none()
+                    && empty =>
+            {
                 Command::Help
             }
-            ["version"] if project.is_none() && search.is_none() && named.is_none() && empty => {
+            ["version"]
+                if project.is_none()
+                    && search.is_none()
+                    && named.is_none()
+                    && model.is_none()
+                    && empty =>
+            {
                 Command::Version
             }
-            ["doctor"] if search.is_none() && named.is_none() && empty => {
+            ["doctor"] if search.is_none() && named.is_none() && model.is_none() && empty => {
                 Command::Doctor { project }
             }
             ["projects", "list"]
-                if project.is_none() && search.is_none() && named.is_none() && empty =>
+                if project.is_none()
+                    && search.is_none()
+                    && named.is_none()
+                    && model.is_none()
+                    && empty =>
             {
                 Command::Projects
             }
-            ["tools", "list"] if project.is_none() && named.is_none() && empty => {
+            ["tools", "list"]
+                if project.is_none() && named.is_none() && model.is_none() && empty =>
+            {
                 Command::ToolsList { search }
             }
             ["tools", action @ ("show" | "call"), rest @ ..] if search.is_none() => {
@@ -144,13 +169,30 @@ pub(crate) fn parse(argv: &[String]) -> Result<Options, Fault> {
                 };
                 let tool = ReadTool::from_name(name).ok_or(Fault::ToolUnavailable)?;
                 match *action {
-                    "show" if project.is_none() && empty => Command::ToolsShow(tool),
-                    "call" => Command::ToolsCall {
+                    "show" if project.is_none() && model.is_none() && empty => {
+                        Command::ToolsShow(tool)
+                    }
+                    "call" if model.is_none() => Command::ToolsCall {
                         tool,
                         project,
                         input,
                     },
                     _ => return Err(Fault::InvalidArgument),
+                }
+            }
+            ["ask", prompt @ ..] if search.is_none() && named.is_none() && empty => {
+                let model_profile_id = model.ok_or(Fault::InvalidArgument)?;
+                if !valid_model_profile_id(model_profile_id)
+                    || prompt.is_empty()
+                    || prompt.join(" ").trim().is_empty()
+                    || prompt.join(" ").len() > MAX_ASK_QUESTION_BYTES
+                {
+                    return Err(Fault::InvalidArgument);
+                }
+                Command::Ask {
+                    model_profile_id: model_profile_id.to_owned(),
+                    project,
+                    question: prompt.join(" "),
                 }
             }
             _ => return Err(Fault::InvalidArgument),
@@ -171,5 +213,12 @@ pub(crate) fn help(english: bool) -> String {
     } else {
         "虚幻盒子只读控制台。macOS 和 Linux 上的 --endpoint 指定 Unix socket 私有目录。"
     };
-    format!("{intro}\n\nuebox [--json] [--endpoint <endpoint>] [--timeout <seconds>]\n  --help | --version\n  doctor [--project <path>]\n  projects list\n  tools list [--search <text>]\n  tools show <name>\n  tools call <name> [--project <path>] [--args '{{}}' | --args-file <path|->]\n\n--lang zh-CN|en-US\n")
+    format!("{intro}\n\nuebox [--json] [--endpoint <endpoint>] [--timeout <seconds>]\n  --help | --version\n  doctor [--project <path>]\n  projects list\n  tools list [--search <text>]\n  tools show <name>\n  tools call <name> [--project <path>] [--args '{{}}' | --args-file <path|->]\n  ask <question> --model <registered-profile-id> [--project <path>]\n\n--lang zh-CN|en-US\n")
+}
+
+fn valid_model_profile_id(value: &str) -> bool {
+    value.len() == 32
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }

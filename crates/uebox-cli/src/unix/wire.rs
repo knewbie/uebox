@@ -6,9 +6,9 @@ use tokio::{
     net::UnixStream,
 };
 
-use crate::{Capabilities, HostError, OnlineProject, ReadTool, ToolReply};
+use crate::{AskReply, Capabilities, HostError, OnlineProject, ReadTool, ToolReply};
 
-pub(super) const MAX_REQUEST: usize = 4 * 1024;
+pub(super) const MAX_REQUEST: usize = 128 * 1024;
 pub(super) const MAX_RESPONSE: usize = 1024 * 1024;
 
 #[derive(Deserialize, Serialize)]
@@ -25,6 +25,14 @@ pub(super) enum Request {
         connection_id: String,
     },
     ExecuteRead,
+    PrepareAsk {
+        #[serde(rename = "projectId")]
+        project_id: String,
+        #[serde(rename = "modelProfileId")]
+        model_profile_id: String,
+        question: String,
+    },
+    ExecuteAsk,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -35,6 +43,7 @@ pub(super) enum Response {
     Tools { tools: Vec<ReadTool> },
     Ready,
     Read { receipt: ToolReply },
+    Ask { reply: AskReply },
     Failure { error: HostError, dispatched: bool },
 }
 

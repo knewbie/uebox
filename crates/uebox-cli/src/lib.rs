@@ -25,8 +25,9 @@ use args::{Arguments, Command, Options};
 use output::Fault;
 
 pub use host::{
-    Capabilities, Connector, Dispatch, Engine, HostError, HostFuture, HostSession, OnlineProject,
-    ReadTool, ToolReply, UnavailableConnector, CLI_CONTRACT_VERSION,
+    AskReply, Capabilities, Connector, Dispatch, Engine, HostError, HostFuture, HostSession,
+    OnlineProject, ReadTool, ToolReply, UnavailableConnector, CLI_CONTRACT_VERSION,
+    MAX_ASK_QUESTION_BYTES, MAX_ASK_REPLY_BYTES,
 };
 pub use output::RunOutput;
 
@@ -137,6 +138,39 @@ impl Deadline {
             Err(error) => Err(error),
         }
     }
+
+    async fn ask(
+        self,
+        host: &dyn HostSession,
+        model_profile_id: &str,
+        question: &str,
+        project: &OnlineProject,
+        allowed_tools: &[ReadTool],
+    ) -> Result<AskReply, Fault> {
+        let dispatch = Dispatch::default();
+        let receipt = self
+            .within(
+                async {
+                    Ok(host
+                        .ask(
+                            model_profile_id,
+                            question,
+                            project,
+                            allowed_tools,
+                            &dispatch,
+                        )
+                        .await)
+                },
+                Fault::TimeoutBeforeDispatch,
+            )
+            .await;
+        let dispatched = dispatch.is_dispatched();
+        match receipt {
+            Ok(result) => result.map_err(|error| Fault::host(error, dispatched)),
+            Err(_) if dispatched => Err(Fault::TimeoutAfterDispatch),
+            Err(error) => Err(error),
+        }
+    }
 }
 
 // A blocked filesystem or stdin cannot hold the runtime open after the command deadline.
@@ -191,6 +225,15 @@ async fn execute(
                 input: Arguments::Empty,
             }
         }
+        Command::Ask {
+            model_profile_id,
+            project,
+            question,
+        } => Command::Ask {
+            model_profile_id,
+            project,
+            question,
+        },
         command => command,
     };
     let endpoint = options
@@ -263,6 +306,46 @@ async fn execute(
             let mut outcome = Outcome::with_data(
                 json!({ "structured": reply.structured, "content": reply.content }),
             );
+            outcome.project = Some(selected.clone());
+            Ok(outcome)
+        }
+        Command::Ask {
+            model_profile_id,
+            project,
+            question,
+        } => {
+            let projects = online(host.as_ref(), deadline).await?;
+            let hint = local_hint(project, cwd, deadline).await?;
+            let selected = project::select(&projects, None, hint)?;
+            let exposed = catalog(host.as_ref(), deadline).await?;
+            let allowed_tools: Vec<_> = ReadTool::allowlist_for(selected.engine)
+                .iter()
+                .copied()
+                .filter(|tool| exposed.contains(tool))
+                .collect();
+            if allowed_tools.is_empty() {
+                return Err(Fault::ToolUnavailable);
+            }
+
+            stderr.push_str("ask: dispatching to native host\n");
+            let reply = deadline
+                .ask(
+                    host.as_ref(),
+                    &model_profile_id,
+                    &question,
+                    selected,
+                    &allowed_tools,
+                )
+                .await?;
+            if reply.text.len() > MAX_ASK_REPLY_BYTES {
+                return Err(Fault::ToolFailed);
+            }
+            let allowed_names: Vec<_> = allowed_tools.iter().map(|tool| tool.name()).collect();
+            let mut outcome = Outcome::with_data(json!({
+                "modelProfileId": model_profile_id,
+                "text": reply.text,
+                "allowedTools": allowed_names
+            }));
             outcome.project = Some(selected.clone());
             Ok(outcome)
         }

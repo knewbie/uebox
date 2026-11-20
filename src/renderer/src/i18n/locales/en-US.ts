@@ -221,6 +221,7 @@ export default {
       }
     },
     modelSettings: {
+      cliModelId: 'CLI model ID',
       title: 'Model settings',
       open: 'Open model settings',
       close: 'Close model settings',
@@ -453,11 +454,14 @@ export default {
       title: 'Native CLI',
       intro:
         'Start a read-only endpoint for the native CLI on this account. Only already-connected editor targets can be queried.',
-      endpoint: 'Use this directory with the CLI --endpoint option.',
+      endpoint: 'Use this address with the CLI --endpoint option.',
+      allowAsk: 'Allow the CLI to send questions and editor data to the configured assistant model',
+      askEnabled: 'CLI questions are enabled for the configured assistant model.',
       start: 'Start CLI endpoint',
       stop: 'Stop CLI endpoint',
       errors: {
-        native_cli_endpoint_busy: 'Another socket already occupies the endpoint.',
+        native_cli_endpoint_busy: 'Another process already occupies the endpoint.',
+        native_cli_restart_required: 'Stop the endpoint before changing CLI question access.',
         native_cli_endpoint_invalid:
           'The local endpoint or its directory failed ownership validation.',
         generic: 'Unable to open or close the native CLI endpoint.'

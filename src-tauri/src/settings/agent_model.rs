@@ -149,9 +149,58 @@ impl AgentModelSource {
     }
 }
 
+#[cfg(any(target_os = "macos", target_os = "linux", windows))]
+pub(crate) async fn resolve_cli_model<R: Runtime>(
+    app: AppHandle<R>,
+    profile_id: String,
+) -> Result<AgentModel, &'static str> {
+    tauri::async_runtime::spawn_blocking(move || {
+        resolve_configured_model(&app, Some(profile_id), true)
+    })
+    .await
+    .map_err(|_| super::UNAVAILABLE)?
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux", windows))]
+pub(crate) async fn validate_cli_model<R: Runtime>(
+    app: AppHandle<R>,
+    profile_id: String,
+) -> Result<(), &'static str> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let settings = app.state::<ModelSettings>();
+        let root = settings.data_dir(&app)?;
+        let file = CatalogFile::open(&root, false)?;
+        let catalog = read(file.as_ref())?;
+        with_agent_binding(&catalog, &profile_id)
+    })
+    .await
+    .map_err(|_| super::UNAVAILABLE)?
+}
+
+fn with_agent_binding(catalog: &super::Catalog, id: &str) -> Result<(), &'static str> {
+    if catalog
+        .bindings
+        .get(&Purpose::Agent)
+        .is_some_and(|saved| saved == id)
+        && catalog.find(id).is_some()
+    {
+        Ok(())
+    } else {
+        Err(NOT_FOUND)
+    }
+}
+
 pub(super) fn resolve_saved_model<R: Runtime>(
     app: &AppHandle<R>,
     selected_profile: Option<String>,
+) -> Result<AgentModel, &'static str> {
+    resolve_configured_model(app, selected_profile, false)
+}
+
+fn resolve_configured_model<R: Runtime>(
+    app: &AppHandle<R>,
+    selected_profile: Option<String>,
+    require_agent_binding: bool,
 ) -> Result<AgentModel, &'static str> {
     let settings = app.state::<ModelSettings>();
     let root = settings.data_dir(app)?;
@@ -164,6 +213,9 @@ pub(super) fn resolve_saved_model<R: Runtime>(
         .or_else(|| catalog.bindings.get(&Purpose::Agent).map(String::as_str))
         .or_else(|| catalog.bindings.get(&Purpose::Chat).map(String::as_str))
         .ok_or(NOT_FOUND)?;
+    if require_agent_binding {
+        with_agent_binding(&catalog, id)?;
+    }
     let profile = catalog.find(id).ok_or(NOT_FOUND)?;
     let bearer = match &profile.authorization {
         Authorization::None => None,

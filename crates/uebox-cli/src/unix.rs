@@ -22,8 +22,9 @@ use tokio::{
 };
 
 use crate::{
-    blocking, project, Capabilities, Connector, Dispatch, HostError, HostFuture, HostSession,
-    OnlineProject, ReadTool, ToolReply, CLI_CONTRACT_VERSION,
+    blocking, project, AskReply, Capabilities, Connector, Dispatch, HostError, HostFuture,
+    HostSession, OnlineProject, ReadTool, ToolReply, CLI_CONTRACT_VERSION, MAX_ASK_QUESTION_BYTES,
+    MAX_ASK_REPLY_BYTES,
 };
 
 use path::{authenticate, io_error, Endpoint, SocketGuard};
@@ -205,6 +206,70 @@ impl HostSession for Session {
             }
         })
     }
+
+    fn ask<'a>(
+        &'a self,
+        model_profile_id: &'a str,
+        question: &'a str,
+        project: &'a OnlineProject,
+        allowed_tools: &'a [ReadTool],
+        dispatch: &'a Dispatch,
+    ) -> HostFuture<'a, AskReply> {
+        Box::pin(async move {
+            if !valid_profile_id(model_profile_id)
+                || question.trim().is_empty()
+                || question.len() > MAX_ASK_QUESTION_BYTES
+                || project.connection_id.is_empty()
+                || project.connection_id.len() > 256
+                || project.connection_id.chars().any(char::is_control)
+                || allowed_tools.is_empty()
+                || allowed_tools
+                    .iter()
+                    .any(|tool| !ReadTool::allowlist_for(project.engine).contains(tool))
+            {
+                return Err(HostError::Incompatible);
+            }
+
+            let mut slot = self.stream.lock().await;
+            let mut stream = slot.take().ok_or(HostError::Unavailable)?;
+            match exchange(
+                &mut stream,
+                Request::PrepareAsk {
+                    project_id: project.connection_id.clone(),
+                    model_profile_id: model_profile_id.to_owned(),
+                    question: question.to_owned(),
+                },
+            )
+            .await?
+            {
+                Response::Ready => {}
+                Response::Failure { error, .. } => return Err(error),
+                _ => return Err(HostError::Incompatible),
+            }
+
+            wire::write(&mut stream, &Request::ExecuteAsk, MAX_REQUEST)
+                .await
+                .map_err(wire_error)?;
+            dispatch.mark_dispatched();
+            let response = wire::read(&mut stream, MAX_RESPONSE)
+                .await
+                .map_err(|_| HostError::Unavailable)?;
+            match response {
+                Response::Ask { reply } if reply.text.len() <= MAX_ASK_REPLY_BYTES => {
+                    *slot = Some(stream);
+                    Ok(reply)
+                }
+                Response::Ask { .. } => Err(HostError::ToolFailed),
+                Response::Failure { error, dispatched } => {
+                    if !dispatched {
+                        dispatch.confirm_not_dispatched();
+                    }
+                    Err(error)
+                }
+                _ => Err(HostError::Unavailable),
+            }
+        })
+    }
 }
 
 /// Bind after the host has provisioned its private directory, within a Tokio runtime with I/O enabled.
@@ -307,12 +372,118 @@ async fn serve_session(mut stream: UnixStream, host: &dyn HostSession) -> io::Re
                 tool,
                 connection_id,
             } => read_tool(&mut stream, host, tool, connection_id).await?,
-            Request::Hello { .. } | Request::ExecuteRead => {
+            Request::PrepareAsk {
+                project_id,
+                model_profile_id,
+                question,
+            } => ask_tool(&mut stream, host, project_id, model_profile_id, question).await?,
+            Request::Hello { .. } | Request::ExecuteRead | Request::ExecuteAsk => {
                 return reply(&mut stream, Response::rejected(HostError::Incompatible)).await;
             }
         };
         reply(&mut stream, response).await?;
     }
+}
+
+struct PreparedAsk {
+    project: OnlineProject,
+    model_profile_id: String,
+    question: String,
+    allowed_tools: Vec<ReadTool>,
+}
+
+async fn prepare_ask(
+    host: &dyn HostSession,
+    project_id: &str,
+    model_profile_id: &str,
+    question: String,
+) -> Result<PreparedAsk, HostError> {
+    if project_id.is_empty()
+        || project_id.len() > 256
+        || project_id.chars().any(char::is_control)
+        || !valid_profile_id(model_profile_id)
+        || question.trim().is_empty()
+        || question.len() > MAX_ASK_QUESTION_BYTES
+    {
+        return Err(HostError::Incompatible);
+    }
+
+    let project = online(host)
+        .await?
+        .into_iter()
+        .find(|project| project.connection_id == project_id)
+        .ok_or(HostError::ProjectNotConnected)?;
+    host.validate_ask_profile(model_profile_id).await?;
+    let exposed = host.tools().await?;
+    let allowed_tools: Vec<_> = ReadTool::allowlist_for(project.engine)
+        .iter()
+        .copied()
+        .filter(|tool| exposed.contains(tool))
+        .collect();
+    if allowed_tools.is_empty() {
+        return Err(HostError::ToolUnavailable);
+    }
+
+    Ok(PreparedAsk {
+        project,
+        model_profile_id: model_profile_id.to_owned(),
+        question,
+        allowed_tools,
+    })
+}
+
+async fn ask_tool(
+    stream: &mut UnixStream,
+    host: &dyn HostSession,
+    project_id: String,
+    model_profile_id: String,
+    question: String,
+) -> io::Result<Response> {
+    let prepared = match while_connected(
+        stream,
+        prepare_ask(host, &project_id, &model_profile_id, question),
+    )
+    .await?
+    {
+        Ok(prepared) => prepared,
+        Err(error) => return Ok(Response::rejected(error)),
+    };
+
+    reply(stream, Response::Ready).await?;
+    if !matches!(read_request(stream).await?, Request::ExecuteAsk) {
+        return Err(io::Error::from(io::ErrorKind::InvalidData));
+    }
+
+    let dispatch = Dispatch::default();
+    let result = while_connected(
+        stream,
+        host.ask(
+            &prepared.model_profile_id,
+            &prepared.question,
+            &prepared.project,
+            &prepared.allowed_tools,
+            &dispatch,
+        ),
+    )
+    .await?;
+    Ok(match result {
+        Ok(reply) if reply.text.len() <= MAX_ASK_REPLY_BYTES => Response::Ask { reply },
+        Ok(_) => Response::Failure {
+            error: HostError::ToolFailed,
+            dispatched: dispatch.is_dispatched(),
+        },
+        Err(error) => Response::Failure {
+            error,
+            dispatched: dispatch.is_dispatched(),
+        },
+    })
+}
+
+fn valid_profile_id(value: &str) -> bool {
+    value.len() == 32
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 async fn online(host: &dyn HostSession) -> Result<Vec<OnlineProject>, HostError> {

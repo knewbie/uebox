@@ -7,20 +7,28 @@ import AppButton from '@renderer/components/AppButton.vue'
 
 interface Endpoint {
   endpoint: string
+  allowAsk?: boolean
 }
 
 const { t } = useI18n()
 const endpoint = ref<string | null>(null)
+const allowAsk = ref(false)
 const busy = ref(false)
 const error = ref<string | null>(null)
-const errors = new Set(['native_cli_endpoint_busy', 'native_cli_endpoint_invalid'])
+const errors = new Set([
+  'native_cli_endpoint_busy',
+  'native_cli_endpoint_invalid',
+  'native_cli_restart_required'
+])
 
 async function apply(action: () => Promise<Endpoint | null>): Promise<void> {
   if (busy.value) return
   busy.value = true
   error.value = null
   try {
-    endpoint.value = (await action())?.endpoint ?? null
+    const selection = await action()
+    endpoint.value = selection?.endpoint ?? null
+    allowAsk.value = selection?.allowAsk === true
   } catch (cause) {
     error.value = typeof cause === 'string' && errors.has(cause) ? cause : 'generic'
   } finally {
@@ -29,7 +37,11 @@ async function apply(action: () => Promise<Endpoint | null>): Promise<void> {
 }
 
 function start(): Promise<void> {
-  return apply(() => invoke<Endpoint>('start_native_cli'))
+  return apply(() =>
+    allowAsk.value
+      ? invoke<Endpoint>('start_native_cli', { allowAsk: true })
+      : invoke<Endpoint>('start_native_cli')
+  )
 }
 
 function stop(): Promise<void> {
@@ -55,16 +67,22 @@ onMounted(() => apply(() => invoke<Endpoint | null>('native_cli_endpoint')))
     <template v-if="endpoint">
       <p>{{ t('tauriPreview.nativeCli.endpoint') }}</p>
       <code class="native-cli-endpoint">{{ endpoint }}</code>
+      <p v-if="allowAsk">{{ t('tauriPreview.nativeCli.askEnabled') }}</p>
       <AppButton :disabled="busy" @click="stop">{{ t('tauriPreview.nativeCli.stop') }}</AppButton>
     </template>
-    <AppButton v-else :disabled="busy" @click="start">{{
-      t('tauriPreview.nativeCli.start')
-    }}</AppButton>
+    <template v-else>
+      <label class="cli-ask">
+        <input v-model="allowAsk" :disabled="busy" type="checkbox" data-cli-allow-ask />
+        {{ t('tauriPreview.nativeCli.allowAsk') }}
+      </label>
+      <AppButton :disabled="busy" @click="start">{{ t('tauriPreview.nativeCli.start') }}</AppButton>
+    </template>
   </section>
 </template>
 
 <style scoped src="../panel.css"></style>
 <style scoped>
+.cli-ask,
 .native-cli-endpoint {
   display: block;
   margin-block-end: var(--space-4);

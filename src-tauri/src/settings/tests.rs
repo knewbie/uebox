@@ -155,7 +155,7 @@ async fn saved_default_loads_only_its_bound_credential_and_revocation_stops_next
     let credentials = Arc::new(CredentialStore::with_backend(MemoryVault::default()));
     let state = ModelSettings {
         credentials: Arc::clone(&credentials),
-        test_data_dir: Some(root.clone()),
+        test_data_dir: Arc::new(std::sync::OnceLock::from(root.clone())),
         active_credentials: Default::default(),
     };
     let app = mock_builder()

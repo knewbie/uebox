@@ -25,3 +25,27 @@ it('shows the native endpoint only after explicit start and stops it from the sa
   expect(wrapper.find('code').exists()).toBe(false)
   wrapper.unmount()
 })
+
+it('sends the ask permission only after explicit opt-in and resets it after stop', async () => {
+  const rpc = vi.mocked(invoke)
+  rpc
+    .mockReset()
+    .mockResolvedValueOnce(null)
+    .mockResolvedValueOnce({ endpoint: '/private/fixture/cli', allowAsk: true })
+    .mockResolvedValueOnce(undefined)
+  const wrapper = mount(NativeCliPanel, { global: { plugins: [createAppI18n('en-US')] } })
+  try {
+    await flushPromises()
+    await wrapper.get('[data-cli-allow-ask]').setValue(true)
+    expect(rpc).toHaveBeenCalledTimes(1)
+    await wrapper.get('button').trigger('click')
+    await flushPromises()
+    expect(rpc).toHaveBeenLastCalledWith('start_native_cli', { allowAsk: true })
+    expect(wrapper.text()).toContain('CLI questions are enabled')
+    await wrapper.get('button').trigger('click')
+    await flushPromises()
+    expect((wrapper.get('[data-cli-allow-ask]').element as HTMLInputElement).checked).toBe(false)
+  } finally {
+    wrapper.unmount()
+  }
+})

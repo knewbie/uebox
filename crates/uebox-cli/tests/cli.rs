@@ -12,16 +12,26 @@ use uebox_cli::{
     OnlineProject, ReadTool, ToolReply,
 };
 
+#[derive(Debug, Eq, PartialEq)]
+struct AskCall {
+    model_profile_id: String,
+    question: String,
+    project_id: String,
+    allowed_tools: Vec<ReadTool>,
+}
+
 #[derive(Default)]
 struct Fixture {
     delay: Duration,
     generation: Option<&'static str>,
     bad_contract: bool,
     auth_failed: bool,
+    model_error: Option<HostError>,
     default_endpoint: Option<&'static str>,
     projects: Option<Vec<OnlineProject>>,
     call_error: Option<HostError>,
     calls: Mutex<Vec<ReadTool>>,
+    asks: Mutex<Vec<AskCall>>,
 }
 
 impl Connector for Fixture {
@@ -99,6 +109,31 @@ impl HostSession for Session<'_> {
             Ok(ToolReply {
                 structured: json!({"name": "Fixture"}),
                 content: Vec::new(),
+            })
+        })
+    }
+
+    fn ask<'a>(
+        &'a self,
+        model_profile_id: &'a str,
+        question: &'a str,
+        project: &'a OnlineProject,
+        allowed_tools: &'a [ReadTool],
+        dispatch: &'a Dispatch,
+    ) -> HostFuture<'a, uebox_cli::AskReply> {
+        Box::pin(async move {
+            if let Some(error) = self.0.model_error {
+                return Err(error);
+            }
+            self.0.asks.lock().unwrap().push(AskCall {
+                model_profile_id: model_profile_id.to_owned(),
+                question: question.to_owned(),
+                project_id: project.connection_id.clone(),
+                allowed_tools: allowed_tools.to_vec(),
+            });
+            dispatch.mark_dispatched();
+            Ok(uebox_cli::AskReply {
+                text: "Fixture answer".into(),
             })
         })
     }
@@ -207,6 +242,103 @@ async fn projects_catalog_show_and_call_use_only_typed_fixture_operations() {
     assert_eq!(
         decode(&empty.stdout)["data"],
         json!({"projects": [], "count": 0})
+    );
+}
+
+#[tokio::test]
+async fn ask_sends_only_registered_model_id_project_and_fixed_engine_read_tools() {
+    let fixture = Fixture {
+        generation: Some("generation-1"),
+        ..Fixture::default()
+    };
+    let output = run(
+        &argv(&[
+            "ask",
+            "Summarize",
+            "the",
+            "open",
+            "project",
+            "--model",
+            "0123456789abcdef0123456789abcdef",
+            "--endpoint",
+            "fixture-private-endpoint",
+            "--json",
+        ]),
+        Path::new(""),
+        &fixture,
+    )
+    .await;
+
+    assert_eq!(output.exit_code, 0, "{}", output.stdout);
+    let value = decode(&output.stdout);
+    assert_eq!(value["data"]["text"], "Fixture answer");
+    assert_eq!(value["data"]["allowedTools"], json!(["ue_project_info"]));
+    assert_eq!(
+        *fixture.asks.lock().unwrap(),
+        [AskCall {
+            model_profile_id: "0123456789abcdef0123456789abcdef".into(),
+            question: "Summarize the open project".into(),
+            project_id: "generation-1".into(),
+            allowed_tools: vec![ReadTool::UnrealProjectInfo]
+        }]
+    );
+    assert!(output.stderr.contains("ask: dispatching to native host"));
+    assert!(!output.stdout.contains("credential"));
+}
+
+#[tokio::test]
+async fn ask_rejects_missing_or_malformed_model_id_before_connecting() {
+    let fixture = Fixture {
+        auth_failed: true,
+        ..Fixture::default()
+    };
+    for args in [
+        argv(&["ask", "question"]),
+        argv(&["ask", "question", "--model", "not-a-profile"]),
+    ] {
+        let output = run(&args, Path::new(""), &fixture).await;
+        assert_eq!(decode(&output.stdout)["error"]["code"], "INVALID_ARGUMENT");
+        assert!(fixture.asks.lock().unwrap().is_empty());
+    }
+}
+
+#[tokio::test]
+async fn ask_reports_unregistered_model_without_dispatch() {
+    let fixture = Fixture {
+        generation: Some("generation-1"),
+        model_error: Some(HostError::ModelUnavailable),
+        ..Fixture::default()
+    };
+    let output = run(
+        &argv(&[
+            "ask",
+            "question",
+            "--model",
+            "0123456789abcdef0123456789abcdef",
+            "--endpoint",
+            "fixture-private-endpoint",
+        ]),
+        Path::new(""),
+        &fixture,
+    )
+    .await;
+    assert_eq!(decode(&output.stdout)["error"]["code"], "MODEL_UNAVAILABLE");
+    assert_eq!(decode(&output.stdout)["error"]["execution"], "not_started");
+}
+
+#[test]
+fn engine_ask_allowlists_are_closed_and_never_include_screenshot_tools() {
+    assert_eq!(
+        ReadTool::allowlist_for(Engine::Unreal),
+        [ReadTool::UnrealProjectInfo]
+    );
+    assert_eq!(
+        ReadTool::allowlist_for(Engine::Unity),
+        [ReadTool::UnityProjectInfo, ReadTool::UnityActiveScene]
+    );
+    assert_eq!(
+        ReadTool::allowlist_for(Engine::Godot),
+        [ReadTool::GodotProjectInfo, ReadTool::GodotSceneTree]
     );
 }
 

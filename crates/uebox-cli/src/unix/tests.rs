@@ -6,7 +6,7 @@ use std::{
 use serde_json::{json, Value};
 
 use super::*;
-use crate::{run, Engine};
+use crate::{run, AskReply, Engine};
 
 #[derive(Default)]
 struct Fixture {
@@ -191,4 +191,101 @@ async fn framing_rejects_oversized_values_and_reads_with_paths_or_unknown_tools(
         assert_eq!(server.await.unwrap().unwrap_err().kind(), io::ErrorKind::InvalidData);
         assert_eq!(fixture.dispatches.load(Ordering::SeqCst), 0);
     }
+}
+
+#[test]
+fn ask_frames_name_only_the_host_project_profile_and_bounded_question() {
+    assert_eq!(
+        serde_json::to_value(Request::PrepareAsk {
+            project_id: "generation-1".into(),
+            model_profile_id: "0123456789abcdef0123456789abcdef".into(),
+            question: "Summarize the project".into(),
+        })
+        .unwrap(),
+        json!({
+            "type": "prepare_ask",
+            "projectId": "generation-1",
+            "modelProfileId": "0123456789abcdef0123456789abcdef",
+            "question": "Summarize the project"
+        })
+    );
+    assert_eq!(
+        serde_json::to_value(Request::ExecuteAsk).unwrap(),
+        json!({"type": "execute_ask"})
+    );
+    assert_eq!(
+        serde_json::to_value(Response::Ask {
+            reply: AskReply {
+                text: "Fixture answer".into()
+            }
+        })
+        .unwrap(),
+        json!({"type":"ask","reply":{"text":"Fixture answer"}})
+    );
+}
+
+#[tokio::test]
+async fn prepare_ask_rejection_never_sends_execute_ask_or_marks_dispatch() {
+    let (client, mut old_peer) = UnixStream::pair().unwrap();
+    let old_host = tokio::spawn(async move {
+        assert!(matches!(
+            wire::read::<Request>(&mut old_peer, MAX_REQUEST)
+                .await
+                .unwrap(),
+            Request::Hello {
+                version: CLI_CONTRACT_VERSION
+            }
+        ));
+        wire::write(
+            &mut old_peer,
+            &Response::Hello {
+                capabilities: Capabilities {
+                    cli_contract_version: CLI_CONTRACT_VERSION,
+                    project_targeting: true,
+                    public_results: true,
+                },
+            },
+            MAX_RESPONSE,
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            wire::read::<Request>(&mut old_peer, MAX_REQUEST)
+                .await
+                .unwrap(),
+            Request::PrepareAsk { .. }
+        ));
+        wire::write(
+            &mut old_peer,
+            &Response::rejected(HostError::Incompatible),
+            MAX_RESPONSE,
+        )
+        .await
+        .unwrap();
+        match wire::read::<Request>(&mut old_peer, MAX_REQUEST).await {
+            Err(error) => assert_eq!(error.kind(), io::ErrorKind::UnexpectedEof),
+            Ok(_) => panic!("the client sent ExecuteAsk after prepare was rejected"),
+        }
+    });
+
+    let session = Session::negotiate(client).await.unwrap();
+    let project = OnlineProject {
+        engine: Engine::Unreal,
+        name: "Fixture".into(),
+        path: "/fixture/project".into(),
+        connection_id: "generation".into(),
+    };
+    let dispatch = Dispatch::default();
+    let result = session
+        .ask(
+            "0123456789abcdef0123456789abcdef",
+            "question",
+            &project,
+            &[ReadTool::UnrealProjectInfo],
+            &dispatch,
+        )
+        .await;
+    assert_eq!(result.unwrap_err(), HostError::Incompatible);
+    assert!(!dispatch.is_dispatched());
+    old_host.await.unwrap();
 }

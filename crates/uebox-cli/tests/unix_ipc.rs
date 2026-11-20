@@ -7,7 +7,7 @@ use std::{
     process::Command,
     sync::{
         atomic::{AtomicUsize, Ordering},
-        Arc,
+        Arc, Mutex,
     },
 };
 
@@ -20,9 +20,17 @@ use tokio::{
 use uebox_cli::{
     run,
     unix::{UnixConnector, UnixServer, SOCKET_NAME},
-    Capabilities, Connector, Dispatch, Engine, HostError, HostFuture, HostSession, OnlineProject,
-    ReadTool, ToolReply,
+    AskReply, Capabilities, Connector, Dispatch, Engine, HostError, HostFuture, HostSession,
+    OnlineProject, ReadTool, ToolReply,
 };
+
+#[derive(Debug, Eq, PartialEq)]
+struct AskCall {
+    model_profile_id: String,
+    question: String,
+    project_id: String,
+    allowed_tools: Vec<ReadTool>,
+}
 
 #[derive(Default)]
 struct Fixture {
@@ -33,6 +41,8 @@ struct Fixture {
     blocking_call: bool,
     cancelled: AtomicUsize,
     tool_lists: AtomicUsize,
+    asks: AtomicUsize,
+    last_ask: Mutex<Option<AskCall>>,
 }
 
 impl HostSession for Fixture {
@@ -87,6 +97,44 @@ impl HostSession for Fixture {
             Ok(ToolReply {
                 structured: json!({"fixture": true}),
                 content: vec![],
+            })
+        })
+    }
+
+    fn validate_ask_profile<'a>(&'a self, model_profile_id: &'a str) -> HostFuture<'a, ()> {
+        Box::pin(async move {
+            if model_profile_id == "00000000000000000000000000000000" {
+                Err(HostError::ModelUnavailable)
+            } else {
+                Ok(())
+            }
+        })
+    }
+
+    fn ask<'a>(
+        &'a self,
+        model_profile_id: &'a str,
+        question: &'a str,
+        project: &'a OnlineProject,
+        allowed_tools: &'a [ReadTool],
+        dispatch: &'a Dispatch,
+    ) -> HostFuture<'a, AskReply> {
+        Box::pin(async move {
+            self.last_ask.lock().unwrap().replace(AskCall {
+                model_profile_id: model_profile_id.to_owned(),
+                question: question.to_owned(),
+                project_id: project.connection_id.clone(),
+                allowed_tools: allowed_tools.to_vec(),
+            });
+            dispatch.mark_dispatched();
+            self.asks.fetch_add(1, Ordering::SeqCst);
+            if self.blocking_call {
+                let _drop = OnDrop(&self.cancelled);
+                self.running.notify_one();
+                std::future::pending::<()>().await;
+            }
+            Ok(AskReply {
+                text: "Fixture answer".into(),
             })
         })
     }
@@ -175,6 +223,81 @@ async fn binary_connects_to_temporary_host_and_concurrent_clients_keep_independe
     stop.send(()).unwrap();
     server.await.unwrap().unwrap();
     assert!(!directory.path().join(SOCKET_NAME).exists());
+}
+
+#[tokio::test]
+async fn ask_crosses_the_authenticated_unix_socket_in_two_phases() {
+    let directory = runtime_dir();
+    let fixture = Arc::new(Fixture::default());
+    let (stop, server) = start(directory.path(), fixture.clone()).await;
+    let output = run(
+        &cli(
+            directory.path(),
+            &[
+                "ask",
+                "Summarize",
+                "the",
+                "open",
+                "project",
+                "--model",
+                "0123456789abcdef0123456789abcdef",
+            ],
+        ),
+        Path::new(""),
+        &UnixConnector,
+    )
+    .await;
+
+    assert_eq!(output.exit_code, 0, "{}", output.stdout);
+    let result: Value = serde_json::from_str(&output.stdout).unwrap();
+    assert_eq!(result["data"]["text"], "Fixture answer");
+    assert_eq!(result["data"]["allowedTools"], json!(["ue_project_info"]));
+    assert_eq!(
+        fixture.last_ask.lock().unwrap().as_ref().unwrap(),
+        &AskCall {
+            model_profile_id: "0123456789abcdef0123456789abcdef".into(),
+            question: "Summarize the open project".into(),
+            project_id: "generation-1".into(),
+            allowed_tools: vec![ReadTool::UnrealProjectInfo]
+        }
+    );
+    assert_eq!(fixture.asks.load(Ordering::SeqCst), 1);
+    assert!(result["project"]["path"]
+        .as_str()
+        .unwrap()
+        .contains("fixture"));
+    assert!(!output.stdout.contains("credential"));
+
+    stop.send(()).unwrap();
+    server.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn ask_rejects_unregistered_model_during_prepare_without_execute() {
+    let directory = runtime_dir();
+    let fixture = Arc::new(Fixture::default());
+    let (stop, server) = start(directory.path(), fixture.clone()).await;
+    let output = run(
+        &cli(
+            directory.path(),
+            &[
+                "ask",
+                "question",
+                "--model",
+                "00000000000000000000000000000000",
+            ],
+        ),
+        Path::new(""),
+        &UnixConnector,
+    )
+    .await;
+    let result: Value = serde_json::from_str(&output.stdout).unwrap();
+    assert_eq!(result["error"]["code"], "MODEL_UNAVAILABLE");
+    assert_eq!(result["error"]["execution"], "not_started");
+    assert_eq!(fixture.asks.load(Ordering::SeqCst), 0);
+
+    stop.send(()).unwrap();
+    server.await.unwrap().unwrap();
 }
 
 #[tokio::test]

@@ -271,3 +271,34 @@ async fn frames_match_the_unix_contract_and_their_bounds_hold() {
         json!({"type":"prepare_read","tool":"unity_active_scene","connectionId":"generation"})
     );
 }
+
+#[test]
+fn ask_frames_match_the_same_closed_contract_as_unix() {
+    assert_eq!(
+        serde_json::to_value(Request::PrepareAsk {
+            project_id: "generation-1".into(),
+            model_profile_id: "0123456789abcdef0123456789abcdef".into(),
+            question: "Summarize the project".into(),
+        })
+        .unwrap(),
+        json!({
+            "type": "prepare_ask",
+            "projectId": "generation-1",
+            "modelProfileId": "0123456789abcdef0123456789abcdef",
+            "question": "Summarize the project"
+        })
+    );
+    assert_eq!(
+        serde_json::to_value(Request::ExecuteAsk).unwrap(),
+        json!({"type": "execute_ask"})
+    );
+    assert_eq!(
+        serde_json::to_value(Response::Ask {
+            reply: crate::AskReply {
+                text: "Fixture answer".into()
+            }
+        })
+        .unwrap(),
+        json!({"type":"ask","reply":{"text":"Fixture answer"}})
+    );
+}

@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 pub const CLI_CONTRACT_VERSION: u32 = 1;
+pub const MAX_ASK_QUESTION_BYTES: usize = 16 * 1024;
+pub const MAX_ASK_REPLY_BYTES: usize = 128 * 1024;
 
 pub type HostFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, HostError>> + Send + 'a>>;
 
@@ -36,6 +38,28 @@ pub trait HostSession: Send + Sync {
         project: &'a OnlineProject,
         dispatch: &'a Dispatch,
     ) -> HostFuture<'a, ToolReply>;
+
+    /// Check that the saved profile exists and is registered for Agent use. This is a local,
+    /// read-only preflight: it must not load credentials or contact the model provider.
+    fn validate_ask_profile<'a>(&'a self, _model_profile_id: &'a str) -> HostFuture<'a, ()> {
+        Box::pin(async { Err(HostError::AskUnavailable) })
+    }
+
+    /// Resolve an explicitly registered Agent-purpose model profile in the host and run one
+    /// text-only question with exactly the supplied, engine-scoped read allowlist. The CLI never
+    /// receives model endpoints, headers, credentials, or tool definitions from the model.
+    /// Implementations must recheck the saved profile purpose and enforce the allowlist again
+    /// before dispatching the model or any engine tool.
+    fn ask<'a>(
+        &'a self,
+        _model_profile_id: &'a str,
+        _question: &'a str,
+        _project: &'a OnlineProject,
+        _allowed_tools: &'a [ReadTool],
+        _dispatch: &'a Dispatch,
+    ) -> HostFuture<'a, AskReply> {
+        Box::pin(async { Err(HostError::AskUnavailable) })
+    }
 }
 
 /// Tracks whether there is a dispatched operation whose outcome can be unknown.
@@ -70,6 +94,15 @@ pub enum HostError {
     ToolUnavailable,
     PermissionDenied,
     ToolFailed,
+    AskUnavailable,
+    ModelUnavailable,
+}
+
+/// Final text-only answer from the native host. Tool receipts and credentials stay host-local.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AskReply {
+    pub text: String,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -122,6 +155,18 @@ pub enum ReadTool {
 }
 
 impl ReadTool {
+    /// Closed read-only tool set for one engine; host availability is intersected by the CLI.
+    pub const fn allowlist_for(engine: Engine) -> &'static [Self] {
+        const UNREAL: &[ReadTool] = &[ReadTool::UnrealProjectInfo];
+        const UNITY: &[ReadTool] = &[ReadTool::UnityProjectInfo, ReadTool::UnityActiveScene];
+        const GODOT: &[ReadTool] = &[ReadTool::GodotProjectInfo, ReadTool::GodotSceneTree];
+        match engine {
+            Engine::Unreal => UNREAL,
+            Engine::Unity => UNITY,
+            Engine::Godot => GODOT,
+        }
+    }
+
     pub fn from_name(name: &str) -> Option<Self> {
         match name {
             "ue_project_info" => Some(Self::UnrealProjectInfo),

@@ -237,6 +237,20 @@ crates/uebox-cli/target/release/uebox doctor --json
 crates/uebox-cli/target/release/uebox --endpoint "/directory/shown/in/UEBox" projects list --json
 ```
 
+To allow `uebox ask`, bind a saved model to the assistant in **Model settings**.
+Enable question access before starting the native CLI endpoint. The ID passed
+with `--model` must match that binding. The model receives the question and
+public results from the selected editor's read-only tools. Question access
+resets when the endpoint stops.
+
+要使用 `uebox ask`，先在「模型设置」中将已保存模型绑定到助手，再启用问答并启动原生
+CLI 入口。`--model` 必须传入已绑定的模型登记 ID。模型只收到问题与所选编辑器的公开
+只读结果。停止入口后，下次启动需要重新选择是否允许问答。
+
+```sh
+uebox ask "What project is connected?" --model <registered-profile-id> --project "/absolute/project/path"
+```
+
 ### MCP endpoint inspection / 检查 MCP 端点
 
 Enter an explicitly trusted Streamable HTTP endpoint in the MCP panel, then

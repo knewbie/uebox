@@ -27,6 +27,8 @@ pub(crate) enum Fault {
     LostAfterDispatch,
     RequestFailed,
     ToolFailed,
+    AskUnavailable,
+    ModelUnavailable,
 }
 
 impl Fault {
@@ -43,6 +45,8 @@ impl Fault {
             HostError::PermissionDenied => Self::RiskNotSupported,
             HostError::ToolFailed if dispatched => Self::ToolFailed,
             HostError::ToolFailed => Self::RequestFailed,
+            HostError::AskUnavailable => Self::AskUnavailable,
+            HostError::ModelUnavailable => Self::ModelUnavailable,
         }
     }
 
@@ -91,6 +95,16 @@ impl Fault {
             Self::RequestFailed | Self::ToolFailed => {
                 ("TOOL_FAILED", 8, "The host did not complete the read.")
             }
+            Self::AskUnavailable => (
+                "ASK_UNAVAILABLE",
+                6,
+                "This native host does not support the ask contract.",
+            ),
+            Self::ModelUnavailable => (
+                "MODEL_UNAVAILABLE",
+                6,
+                "The requested registered Agent model is unavailable.",
+            ),
         }
     }
 

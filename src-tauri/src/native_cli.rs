@@ -1,4 +1,5 @@
 //! Optional native console endpoint inside the running Tauri process.
+mod ask;
 #[cfg(unix)]
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -7,8 +8,8 @@ use serde::Serialize;
 use tauri::{AppHandle, Manager, Runtime};
 use tokio::sync::oneshot;
 use uebox_cli::{
-    Capabilities, Dispatch, HostError, HostFuture, HostSession, OnlineProject, ReadTool, ToolReply,
-    CLI_CONTRACT_VERSION,
+    AskReply, Capabilities, Dispatch, HostError, HostFuture, HostSession, OnlineProject, ReadTool,
+    ToolReply, CLI_CONTRACT_VERSION,
 };
 
 #[cfg(unix)]
@@ -29,19 +30,23 @@ type EndpointAddress = String;
 #[derive(Default)]
 pub(crate) struct NativeCli {
     service: tauri::async_runtime::Mutex<Option<Running>>,
+    ask_gate: tauri::async_runtime::Mutex<()>,
     #[cfg(all(test, unix))]
     test_profile: std::sync::OnceLock<PathBuf>,
 }
 
 struct Running {
     endpoint: EndpointAddress,
+    allow_ask: bool,
     stop: oneshot::Sender<()>,
     task: tauri::async_runtime::JoinHandle<Result<(), HostError>>,
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct Endpoint {
     endpoint: EndpointAddress,
+    allow_ask: bool,
 }
 
 fn endpoint_error(error: HostError) -> &'static str {
@@ -69,13 +74,19 @@ fn profile_root<R: Runtime>(
 #[tauri::command]
 pub(crate) async fn start_native_cli<R: Runtime>(
     app: AppHandle<R>,
+    allow_ask: Option<bool>,
 ) -> Result<Endpoint, &'static str> {
+    let allow_ask = allow_ask.unwrap_or(false);
     let host = app.state::<NativeCli>();
     let mut stored = host.service.lock().await;
     if let Some(service) = stored.as_ref() {
         if !service.stop.is_closed() {
+            if service.allow_ask != allow_ask {
+                return Err("native_cli_restart_required");
+            }
             return Ok(Endpoint {
                 endpoint: service.endpoint.clone(),
+                allow_ask,
             });
         }
         *stored = None;
@@ -106,16 +117,23 @@ pub(crate) async fn start_native_cli<R: Runtime>(
         (WindowsServer::bind(&name).map_err(endpoint_error)?, name)
     };
     let (stop, shutdown) = oneshot::channel();
-    let console = Arc::new(Console { app: app.clone() });
+    let console = Arc::new(Console {
+        app: app.clone(),
+        allow_ask,
+    });
     let task = tauri::async_runtime::spawn(socket.serve(console, async {
         let _ = shutdown.await;
     }));
     *stored = Some(Running {
         endpoint: endpoint.clone(),
+        allow_ask,
         stop,
         task,
     });
-    Ok(Endpoint { endpoint })
+    Ok(Endpoint {
+        endpoint,
+        allow_ask,
+    })
 }
 
 #[tauri::command]
@@ -127,6 +145,7 @@ pub(crate) async fn native_cli_endpoint<R: Runtime>(app: AppHandle<R>) -> Option
         .filter(|service| !service.stop.is_closed())
         .map(|service| Endpoint {
             endpoint: service.endpoint.clone(),
+            allow_ask: service.allow_ask,
         })
 }
 
@@ -147,6 +166,7 @@ pub(crate) async fn stop_native_cli<R: Runtime>(app: AppHandle<R>) -> Result<(),
 
 struct Console<R: Runtime> {
     app: AppHandle<R>,
+    allow_ask: bool,
 }
 
 impl<R: Runtime> HostSession for Console<R> {
@@ -254,6 +274,33 @@ impl<R: Runtime> HostSession for Console<R> {
             })
         })
     }
+    fn validate_ask_profile<'a>(&'a self, model_profile_id: &'a str) -> HostFuture<'a, ()> {
+        Box::pin(async move {
+            if !self.allow_ask {
+                return Err(HostError::AskUnavailable);
+            }
+            crate::settings::validate_cli_model(self.app.clone(), model_profile_id.to_owned())
+                .await
+                .map_err(|_| HostError::ModelUnavailable)
+        })
+    }
+    fn ask<'a>(
+        &'a self,
+        model_profile_id: &'a str,
+        question: &'a str,
+        project: &'a OnlineProject,
+        allowed_tools: &'a [ReadTool],
+        dispatch: &'a Dispatch,
+    ) -> HostFuture<'a, AskReply> {
+        Box::pin(ask::answer(
+            self,
+            model_profile_id,
+            question,
+            project,
+            allowed_tools,
+            dispatch,
+        ))
+    }
 }
 
 #[cfg(all(test, feature = "unreal", unix))]
@@ -279,6 +326,37 @@ mod tests {
         assert_eq!(config["identifier"], uebox_cli::unix::APP_IDENTIFIER);
     }
 
+    async fn model_step(listener: &tokio::net::TcpListener, event: Value) -> Value {
+        use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut stream = BufReader::new(stream);
+        let mut content_length = None;
+        loop {
+            let mut line = String::new();
+            assert!(stream.read_line(&mut line).await.unwrap() > 0);
+            if line == "\r\n" {
+                break;
+            }
+            if let Some((key, value)) = line.split_once(':') {
+                if key.eq_ignore_ascii_case("content-length") {
+                    content_length = Some(value.trim().parse::<usize>().unwrap());
+                }
+            }
+        }
+        let mut body = vec![0; content_length.unwrap()];
+        stream.read_exact(&mut body).await.unwrap();
+        let sse = format!("data: {event}\n\ndata: [DONE]\n\n");
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{sse}", sse.len()
+        );
+        stream
+            .into_inner()
+            .write_all(response.as_bytes())
+            .await
+            .unwrap();
+        serde_json::from_slice(&body).unwrap()
+    }
+
     #[tokio::test]
     async fn native_console_uses_real_socket_and_fixed_read_only_unreal_target() {
         // /var and /tmp are symlink aliases on macOS. The endpoint requires
@@ -297,7 +375,16 @@ mod tests {
             .unwrap();
         assert!(native_cli_endpoint(handle.clone()).await.is_none());
         assert!(!data.path().join("p").exists());
-        let endpoint = start_native_cli(handle.clone()).await.unwrap().endpoint;
+        let default_start = start_native_cli(handle.clone(), None).await.unwrap();
+        assert!(!default_start.allow_ask);
+        assert_eq!(
+            start_native_cli(handle.clone(), Some(true)).await.err(),
+            Some("native_cli_restart_required")
+        );
+        stop_native_cli(handle.clone()).await.unwrap();
+        let started = start_native_cli(handle.clone(), Some(true)).await.unwrap();
+        assert!(started.allow_ask);
+        let endpoint = started.endpoint;
         assert!(endpoint.join(SOCKET_NAME).exists());
         let bridge = Arc::new(UnrealBridge::bind(0).await.unwrap());
         let address = bridge.local_addr();
@@ -326,6 +413,7 @@ mod tests {
             .await
             .unwrap();
         let response = tokio::spawn(async move {
+            let mut count = 0;
             while let Some(message) = peer.next().await {
                 match message.unwrap() {
                     Message::Text(text) => {
@@ -345,7 +433,19 @@ mod tests {
                         ))
                         .await
                         .unwrap();
-                        return;
+                        count += 1;
+                        if count == 2 {
+                            while let Some(message) = peer.next().await {
+                                match message {
+                                    Ok(Message::Ping(payload)) => {
+                                        peer.send(Message::Pong(payload)).await.unwrap()
+                                    }
+                                    Err(_) => break,
+                                    _ => {}
+                                }
+                            }
+                            return;
+                        }
                     }
                     Message::Ping(payload) => peer.send(Message::Pong(payload)).await.unwrap(),
                     _ => {}
@@ -365,9 +465,56 @@ mod tests {
         assert_eq!(result.exit_code, 0, "{}", result.stdout);
         assert_eq!(document["data"]["structured"]["projectName"], "Fixture UE");
         assert!(!result.stdout.contains("private-fixture"));
-        response.await.unwrap();
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let model_address = listener.local_addr().unwrap();
+        let profile_id = crate::settings::cli_test_profile(
+            handle.clone(),
+            data.path().join("models"),
+            format!("http://{model_address}/v1/chat/completions"),
+        )
+        .await;
+        let model = tokio::spawn(async move {
+            let request = model_step(&listener, json!({"choices":[{"index":0,"delta":{"tool_calls":[{
+                "index":0,"id":"fixture-call","type":"function","function":{"name":"ue_project_info","arguments":"{}"}
+            }]},"finish_reason":"tool_calls"}]})).await;
+            let definitions = request["tools"].as_array().unwrap();
+            assert_eq!(definitions.len(), 1);
+            assert_eq!(definitions[0]["function"]["name"], "ue_project_info");
+            let request = model_step(&listener, json!({"choices":[{"index":0,"delta":{"content":"Fixture model answer"},"finish_reason":"stop"}]})).await;
+            let text = request.to_string();
+            assert!(text.contains("Fixture UE"));
+            assert!(!text.contains("private-fixture"));
+        });
+        let ask_args = vec![
+            "--endpoint".to_owned(),
+            endpoint.to_string_lossy().into_owned(),
+            "ask".to_owned(),
+            "What project is selected?".to_owned(),
+            "--model".to_owned(),
+            profile_id.clone(),
+        ];
+        let mut unbound = ask_args.clone();
+        *unbound.last_mut().unwrap() = "0".repeat(32);
+        let refused = run(&unbound, data.path(), &UnixConnector).await;
+        assert_ne!(refused.exit_code, 0, "{}", refused.stdout);
+        let error: Value = serde_json::from_str(&refused.stdout).unwrap();
+        assert_eq!(error["error"]["code"], "MODEL_UNAVAILABLE");
+        let reply = tokio::time::timeout(
+            Duration::from_secs(7),
+            run(&ask_args, data.path(), &UnixConnector),
+        )
+        .await
+        .unwrap();
+        assert_eq!(reply.exit_code, 0, "{}", reply.stdout);
+        let document: Value = serde_json::from_str(&reply.stdout).unwrap();
+        assert_eq!(document["data"]["text"], "Fixture model answer");
+        assert_eq!(document["data"]["allowedTools"], json!(["ue_project_info"]));
+        model.await.unwrap();
         stop_native_cli(handle).await.unwrap();
         assert!(!endpoint.join(SOCKET_NAME).exists());
         bridge.shutdown().await;
+        response.await.unwrap();
     }
 }

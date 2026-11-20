@@ -200,6 +200,10 @@ async function importSelected(): Promise<void> {
           <div>
             <strong>{{ profile.title }}</strong>
             <p>{{ profile.model }}</p>
+            <p v-if="catalog.bindings.agent === profile.id">
+              {{ t('tauriPreview.modelSettings.cliModelId') }}
+              <code class="model-profile-id">{{ profile.id }}</code>
+            </p>
             <p v-if="profile.authorization === 'needsAuthorization'">
               {{ t('tauriPreview.modelSettings.needsAuthorization') }}
             </p>
@@ -342,5 +346,9 @@ async function importSelected(): Promise<void> {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2);
+}
+.model-profile-id {
+  user-select: all;
+  overflow-wrap: anywhere;
 }
 </style>
