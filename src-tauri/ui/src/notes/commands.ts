@@ -2,18 +2,28 @@ import { invoke } from '@tauri-apps/api/core'
 import { z } from 'zod'
 
 export const NOTES_PAGE_SIZE = 20
+export const MAX_NOTES_MANIFEST_BYTES = 64 * 1024 * 1024
 const id = z.string().regex(/^\d+$/)
 const nextId = z.union([id, z.literal(''), z.null()]).transform((value) => value || null)
 const notebookSchema = z.object({ id, title: z.string() })
 const summarySchema = z.object({ id, title: z.string(), notebookId: id.nullable() })
-const noteSchema = summarySchema.extend({ content: z.string() })
+const attachmentSchema = z.object({
+  id,
+  kind: z.enum(['binary', 'html']),
+  fileName: z.string().nullable()
+})
+const noteSchema = summarySchema.extend({
+  content: z.string(),
+  format: z.enum(['plain', 'markdown', 'html']).optional(),
+  attachments: z.array(attachmentSchema).optional()
+})
 const notebooksPage = z.object({ items: z.array(notebookSchema), nextId })
 const notesPage = z.object({ items: z.array(summarySchema), nextId })
 
 export type Notebook = z.infer<typeof notebookSchema>
 export type NoteSummary = z.infer<typeof summarySchema>
 export type Note = z.infer<typeof noteSchema>
-export type SaveNoteInput = Omit<Note, 'id'> & { id: string | null }
+export type SaveNoteInput = Pick<Note, 'notebookId' | 'title' | 'content'> & { id: string | null }
 
 async function request<T>(
   command: string,
@@ -85,4 +95,62 @@ export function removeNotebook(notebookId: string): Promise<boolean> {
 
 export function removeNote(noteId: string): Promise<boolean> {
   return request('remove_note', { noteId }, (value) => z.boolean().parse(value))
+}
+
+export async function exportNoteAttachment(noteId: string, attachmentId: string): Promise<boolean> {
+  try {
+    return z.boolean().parse(await invoke('export_note_attachment', { noteId, attachmentId }))
+  } catch (error) {
+    throw new Error(
+      error === 'notes_attachment_destination_exists' ? error : 'notes_attachment_export_failed'
+    )
+  }
+}
+
+const sourceSchema = z.object({
+  id,
+  kind: z.enum([
+    'file',
+    'link',
+    'youtube',
+    'bilibili',
+    'text',
+    'note',
+    'ue-project',
+    'wechat',
+    'mp',
+    'unknown'
+  ]),
+  title: z.string(),
+  fileName: z.string().nullable()
+})
+const sourcesPage = z.object({ items: z.array(sourceSchema), nextId })
+const sourceBody = z.object({ id, content: z.string() })
+
+export type NotebookSource = z.infer<typeof sourceSchema>
+
+export function listNotebookSources(
+  notebookId: string,
+  afterId: string | null
+): Promise<z.infer<typeof sourcesPage>> {
+  return request(
+    'list_notebook_sources',
+    { notebookId, afterId, limit: NOTES_PAGE_SIZE },
+    (value) => {
+      const page = sourcesPage.parse(value)
+      checkCursor(page.nextId, afterId)
+      return page
+    }
+  )
+}
+
+export function readNotebookSource(
+  notebookId: string,
+  sourceId: string
+): Promise<z.infer<typeof sourceBody>> {
+  return request('read_notebook_source', { notebookId, sourceId }, (value) => {
+    const source = sourceBody.parse(value)
+    if (source.id !== sourceId) throw new Error('notes_unavailable')
+    return source
+  })
 }

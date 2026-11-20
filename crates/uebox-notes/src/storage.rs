@@ -11,7 +11,7 @@ use rusqlite::{config::DbConfig, ffi, Connection, OpenFlags};
 use crate::NotesError;
 
 const APPLICATION_ID: u32 = 0x5542_4e54; // UBNT
-const VERSION: u32 = 1;
+const VERSION: u32 = 2;
 const SIDECARS: [&str; 3] = ["-wal", "-shm", "-journal"];
 
 const NOTEBOOKS: &str = "CREATE TABLE notebooks (
@@ -26,8 +26,44 @@ const NOTES: &str = "CREATE TABLE notes (
 ) STRICT";
 const LEGACY_IDENTITIES: &str = "CREATE TABLE legacy_identities (source TEXT NOT NULL, identity TEXT NOT NULL, record_id INTEGER NOT NULL, fingerprint BLOB NOT NULL CHECK (length(fingerprint) = 32), PRIMARY KEY (source, identity)) STRICT, WITHOUT ROWID";
 const NOTES_BY_NOTEBOOK: &str = "CREATE INDEX notes_by_notebook ON notes(notebook_id, id)";
+const NOTE_FORMATS: &str = "CREATE TABLE note_formats (
+    note_id INTEGER PRIMARY KEY REFERENCES notes(id) ON DELETE CASCADE CHECK (note_id > 0),
+    format TEXT NOT NULL CHECK (format IN ('markdown','html','plain'))
+) STRICT, WITHOUT ROWID";
+const NOTE_ATTACHMENTS: &str = "CREATE TABLE note_attachments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT CHECK (id > 0),
+    note_id INTEGER NOT NULL REFERENCES notes(id) ON DELETE CASCADE CHECK (note_id > 0),
+    kind TEXT NOT NULL CHECK (kind IN ('binary','html')),
+    media_type TEXT,
+    file_name TEXT,
+    bytes BLOB NOT NULL CHECK (length(bytes) <= 16777216),
+    sha256 BLOB NOT NULL CHECK (length(sha256) = 32),
+    position INTEGER NOT NULL CHECK (position >= 0)
+) STRICT";
+const NOTE_ATTACHMENTS_BY_NOTE: &str =
+    "CREATE INDEX note_attachments_by_note ON note_attachments(note_id, position, id)";
+const ORIGINAL_FILES: &str = "CREATE TABLE original_files (
+    id INTEGER PRIMARY KEY AUTOINCREMENT CHECK (id > 0),
+    source TEXT NOT NULL,
+    identity TEXT NOT NULL,
+    notebook_id INTEGER NOT NULL REFERENCES notebooks(id) ON DELETE CASCADE CHECK (notebook_id > 0),
+    notebook_identity TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('file','link','youtube','bilibili','ue-project','wechat','mp','unknown')),
+    title TEXT NOT NULL,
+    content TEXT NOT NULL,
+    raw_content TEXT,
+    source_url TEXT,
+    file_name TEXT,
+    file_path TEXT,
+    media_url TEXT,
+    fingerprint BLOB NOT NULL CHECK (length(fingerprint) = 32)
+) STRICT";
+const ORIGINAL_FILES_BY_IDENTITY: &str =
+    "CREATE UNIQUE INDEX original_files_by_identity ON original_files(source, identity)";
+const ORIGINAL_FILES_BY_NOTEBOOK: &str =
+    "CREATE INDEX original_files_by_notebook ON original_files(notebook_id, id)";
 // SQLite creates sqlite_sequence for the AUTOINCREMENT primary keys.
-const SCHEMA: [(&str, &str, &str, &str); 5] = [
+const SCHEMA_V1: [(&str, &str, &str, &str); 5] = [
     (
         "table",
         "legacy_identities",
@@ -37,6 +73,49 @@ const SCHEMA: [(&str, &str, &str, &str); 5] = [
     ("table", "notebooks", "notebooks", NOTEBOOKS),
     ("table", "notes", "notes", NOTES),
     ("index", "notes_by_notebook", "notes", NOTES_BY_NOTEBOOK),
+    (
+        "table",
+        "sqlite_sequence",
+        "sqlite_sequence",
+        "CREATE TABLE sqlite_sequence(name,seq)",
+    ),
+];
+const SCHEMA_V2: [(&str, &str, &str, &str); 11] = [
+    (
+        "table",
+        "legacy_identities",
+        "legacy_identities",
+        LEGACY_IDENTITIES,
+    ),
+    (
+        "table",
+        "note_attachments",
+        "note_attachments",
+        NOTE_ATTACHMENTS,
+    ),
+    (
+        "index",
+        "note_attachments_by_note",
+        "note_attachments",
+        NOTE_ATTACHMENTS_BY_NOTE,
+    ),
+    ("table", "note_formats", "note_formats", NOTE_FORMATS),
+    ("table", "notebooks", "notebooks", NOTEBOOKS),
+    ("table", "notes", "notes", NOTES),
+    ("index", "notes_by_notebook", "notes", NOTES_BY_NOTEBOOK),
+    ("table", "original_files", "original_files", ORIGINAL_FILES),
+    (
+        "index",
+        "original_files_by_identity",
+        "original_files",
+        ORIGINAL_FILES_BY_IDENTITY,
+    ),
+    (
+        "index",
+        "original_files_by_notebook",
+        "original_files",
+        ORIGINAL_FILES_BY_NOTEBOOK,
+    ),
     (
         "table",
         "sqlite_sequence",
@@ -72,11 +151,22 @@ pub(super) fn create_new(path: &Path) -> Result<Connection, NotesError> {
     let transaction = connection.transaction()?;
     transaction.pragma_update(None, "application_id", APPLICATION_ID)?;
     transaction.pragma_update(None, "user_version", VERSION)?;
-    for sql in [NOTEBOOKS, NOTES, LEGACY_IDENTITIES, NOTES_BY_NOTEBOOK] {
+    for sql in [
+        NOTEBOOKS,
+        NOTES,
+        LEGACY_IDENTITIES,
+        NOTE_FORMATS,
+        NOTE_ATTACHMENTS,
+        ORIGINAL_FILES,
+        NOTES_BY_NOTEBOOK,
+        NOTE_ATTACHMENTS_BY_NOTE,
+        ORIGINAL_FILES_BY_IDENTITY,
+        ORIGINAL_FILES_BY_NOTEBOOK,
+    ] {
         transaction.execute_batch(sql)?;
     }
     transaction.commit()?;
-    validate_database(&connection)?;
+    validate_database(&connection, &SCHEMA_V2, VERSION)?;
     connection
         .close()
         .map_err(|(_, error)| NotesError::from(error))?;
@@ -161,15 +251,41 @@ pub(super) fn open_existing(path: &Path) -> Result<Connection, NotesError> {
     if metadata.len() < 100 {
         return Err(NotesError::Corrupt);
     }
-    {
+    let version = {
         let read_only = open_sqlite(&path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
-        validate_database(&read_only)?;
-    }
+        let version: u32 = read_only.pragma_query_value(None, "user_version", |row| row.get(0))?;
+        match version {
+            1 => validate_database(&read_only, &SCHEMA_V1, 1)?,
+            VERSION => validate_database(&read_only, &SCHEMA_V2, VERSION)?,
+            _ => return Err(NotesError::Unsupported),
+        }
+        version
+    };
     reject_sidecars(&path)?;
-    let connection = open_sqlite(&path, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
-    validate_header(&connection)?;
+    let mut connection = open_sqlite(&path, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
+    validate_header(&connection, version)?;
+    if version == 1 {
+        migrate_v1_to_v2(&mut connection)?;
+    }
     configure(&connection)?;
     Ok(connection)
+}
+
+fn migrate_v1_to_v2(connection: &mut Connection) -> Result<(), NotesError> {
+    let transaction = connection.transaction()?;
+    for sql in [
+        NOTE_FORMATS,
+        NOTE_ATTACHMENTS,
+        NOTE_ATTACHMENTS_BY_NOTE,
+        ORIGINAL_FILES,
+        ORIGINAL_FILES_BY_IDENTITY,
+        ORIGINAL_FILES_BY_NOTEBOOK,
+    ] {
+        transaction.execute_batch(sql)?;
+    }
+    transaction.pragma_update(None, "user_version", VERSION)?;
+    transaction.commit()?;
+    Ok(())
 }
 
 fn regular_file(metadata: &Metadata) -> bool {
@@ -284,7 +400,7 @@ fn io_error(error: io::Error) -> NotesError {
     }
 }
 
-fn validate_header(connection: &Connection) -> Result<(), NotesError> {
+fn validate_header(connection: &Connection, version: u32) -> Result<(), NotesError> {
     let header = raw_header(connection)?;
     if &header[..16] != b"SQLite format 3\0" {
         return Err(NotesError::Corrupt);
@@ -292,7 +408,7 @@ fn validate_header(connection: &Connection) -> Result<(), NotesError> {
     // SQLite header: read/write formats, text encoding, user_version, application_id.
     if header[18..20] != [1, 1]
         || header[56..60] != 1_u32.to_be_bytes()
-        || header[60..64] != VERSION.to_be_bytes()
+        || header[60..64] != version.to_be_bytes()
         || header[68..72] != APPLICATION_ID.to_be_bytes()
     {
         return Err(NotesError::Unsupported);
@@ -300,26 +416,30 @@ fn validate_header(connection: &Connection) -> Result<(), NotesError> {
     Ok(())
 }
 
-fn validate_database(connection: &Connection) -> Result<(), NotesError> {
-    validate_header(connection)?;
+fn validate_database(
+    connection: &Connection,
+    schema: &[(&str, &str, &str, &str)],
+    version: u32,
+) -> Result<(), NotesError> {
+    validate_header(connection, version)?;
     let transaction = connection.unchecked_transaction()?;
     {
         let application_id: u32 =
             transaction.pragma_query_value(None, "application_id", |row| row.get(0))?;
-        let version: u32 =
+        let actual_version: u32 =
             transaction.pragma_query_value(None, "user_version", |row| row.get(0))?;
         let mode: String =
             transaction.pragma_query_value(None, "journal_mode", |row| row.get(0))?;
         if application_id != APPLICATION_ID
-            || version != VERSION
+            || actual_version != version
             || !mode.eq_ignore_ascii_case("delete")
         {
             return Err(NotesError::Unsupported);
         }
-        let mut schema = transaction
+        let mut statement = transaction
             .prepare("SELECT type, name, tbl_name, sql FROM sqlite_schema ORDER BY name")?;
-        let mut rows = schema.query([])?;
-        for expected in SCHEMA {
+        let mut rows = statement.query([])?;
+        for expected in schema {
             let row = rows.next()?.ok_or(NotesError::Unsupported)?;
             let actual: (String, String, String, Option<String>) =
                 (row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?);

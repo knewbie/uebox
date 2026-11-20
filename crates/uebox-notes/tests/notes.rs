@@ -217,7 +217,7 @@ fn future_version_and_wal_are_rejected_without_changing_source_bytes() {
     let path = temporary.path().join("notes.sqlite");
     drop(NotesStore::create_new(&path).unwrap());
     let raw = rusqlite::Connection::open(&path).unwrap();
-    raw.pragma_update(None, "user_version", 2).unwrap();
+    raw.pragma_update(None, "user_version", 3).unwrap();
     drop(raw);
     let before = fs::read(&path).unwrap();
     assert!(matches!(
@@ -227,7 +227,7 @@ fn future_version_and_wal_are_rejected_without_changing_source_bytes() {
     assert_eq!(fs::read(&path).unwrap(), before);
 
     let raw = rusqlite::Connection::open(&path).unwrap();
-    raw.pragma_update(None, "user_version", 1).unwrap();
+    raw.pragma_update(None, "user_version", 2).unwrap();
     drop(raw);
     drop(NotesStore::open_existing(&path).unwrap());
     let before = fs::read(&path).unwrap();

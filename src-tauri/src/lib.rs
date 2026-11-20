@@ -162,12 +162,15 @@ pub fn configure_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> taur
             settings::transfer::import_model_profiles,
             notes::list_notebooks,
             notes::list_notes,
+            notes::list_notebook_sources,
+            notes::read_notebook_source,
             notes::get_note,
             notes::save_notebook,
             notes::save_note,
             notes::remove_note,
             notes::remove_notebook,
             notes::transfer::import_legacy_notes,
+            notes::attachments::export_note_attachment,
             project_library::list_registered_projects,
             project_library::register_project,
             project_library::remove_registered_project,
@@ -258,7 +261,7 @@ pub fn configure_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> taur
 }
 
 pub fn run() {
-    let app = configure_commands(tauri::Builder::default())
+    let app = configure_commands(tauri::Builder::default().plugin(tauri_plugin_dialog::init()))
         .setup(|app| {
             #[cfg(any(target_os = "macos", target_os = "linux", windows))]
             let _ = app

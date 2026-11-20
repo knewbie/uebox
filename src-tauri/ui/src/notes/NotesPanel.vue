@@ -5,6 +5,9 @@ import AInput from 'ant-design-vue/es/input/Input'
 import AppAlert from '@renderer/components/AppAlert.vue'
 import AppButton from '@renderer/components/AppButton.vue'
 import LegacyNotesImport from './LegacyNotesImport.vue'
+import NoteBody from './NoteBody.vue'
+import NoteAttachments from './NoteAttachments.vue'
+import NotebookSources from './NotebookSources.vue'
 import {
   getNote,
   listNotebooks,
@@ -26,6 +29,7 @@ const notebooksLoaded = ref(false)
 const notebooksLoading = ref(false)
 const notebooksError = ref(false)
 const scope = ref<Notebook | null>(null)
+const importRevision = ref(0)
 const notes = ref<NoteSummary[]>([])
 const notesNext = ref<string | null>(null)
 const notesLoaded = ref(false)
@@ -307,6 +311,11 @@ function refreshLists(): void {
   void fetchNotes()
 }
 
+function refreshAfterImport(): void {
+  importRevision.value += 1
+  refreshLists()
+}
+
 onMounted(refreshLists)
 onBeforeUnmount(() => {
   disposed = true
@@ -320,7 +329,7 @@ onBeforeUnmount(() => {
   <section id="notes" class="panel" aria-labelledby="notes-heading" tabindex="-1">
     <h2 id="notes-heading">{{ t('tauriPreview.notes.title') }}</h2>
     <p class="section-description">{{ t('tauriPreview.notes.intro') }}</p>
-    <LegacyNotesImport @imported="refreshLists" />
+    <LegacyNotesImport @imported="refreshAfterImport" />
     <p v-if="writing" role="status">{{ t('tauriPreview.notes.saving') }}</p>
     <AppAlert
       v-if="writeError"
@@ -494,6 +503,12 @@ onBeforeUnmount(() => {
           @click="fetchNotes(true)"
           >{{ t('tauriPreview.notes.more') }}</AppButton
         >
+        <NotebookSources
+          v-if="scope"
+          :key="scope.id + ':' + importRevision"
+          :notebook-id="scope.id"
+          :disabled="locked"
+        />
       </section>
       <section class="notes-document" :aria-busy="noteLoading || writing">
         <p v-if="noteLoading" role="status">{{ t('tauriPreview.notes.loading') }}</p>
@@ -541,7 +556,13 @@ onBeforeUnmount(() => {
               t('tauriPreview.notes.deleteNote')
             }}</AppButton>
           </div>
-          <pre data-note-content class="notes-text notes-content">{{ note.content }}</pre>
+          <NoteBody v-if="note.content" :content="note.content" :format="note.format" />
+          <NoteAttachments
+            v-if="note.attachments?.length"
+            :key="note.id"
+            :note-id="note.id"
+            :attachments="note.attachments"
+          />
         </article>
         <p v-else>{{ t('tauriPreview.notes.noSelection') }}</p>
       </section>

@@ -6,13 +6,17 @@ import { z } from 'zod'
 import AppAlert from '@renderer/components/AppAlert.vue'
 import AppButton from '@renderer/components/AppButton.vue'
 import { readLegacyManifest, ManifestReadError } from '../legacy-history/manifest'
+import { MAX_NOTES_MANIFEST_BYTES } from './commands'
 
 const count = z.number().int().nonnegative()
 const reportSchema = z.object({
   notebooksInserted: count,
   notebooksExisting: count,
   notesInserted: count,
-  notesExisting: count
+  notesExisting: count,
+  attachmentsInserted: count.optional(),
+  originalFilesInserted: count.optional(),
+  originalFilesExisting: count.optional()
 })
 
 const { t } = useI18n()
@@ -35,13 +39,17 @@ async function importFile(): Promise<void> {
   importing.value = true
   error.value = null
   try {
-    const manifest = await readLegacyManifest(selected)
+    const manifest = await readLegacyManifest(selected, MAX_NOTES_MANIFEST_BYTES)
     report.value = reportSchema.parse(await invoke('import_legacy_notes', { manifest }))
     file.value = null
     if (input.value) input.value.value = ''
     emit('imported')
   } catch (cause) {
-    if (cause instanceof ManifestReadError && cause.code === 'tooLarge') error.value = 'importLimit'
+    if (
+      cause === 'notes_import_limit' ||
+      (cause instanceof ManifestReadError && cause.code === 'tooLarge')
+    )
+      error.value = 'importLimit'
     else if (cause === 'notes_import_conflict') error.value = 'importConflict'
     else error.value = 'importFailed'
   } finally {
@@ -68,7 +76,17 @@ async function importFile(): Promise<void> {
       </AppButton>
     </template>
     <AppAlert v-if="error" type="error" :message="t(`tauriPreview.notes.${error}`)" />
-    <p v-if="report" role="status">{{ t('tauriPreview.notes.imported', report) }}</p>
+    <p v-if="report" role="status">
+      {{ t('tauriPreview.notes.imported', report) }}
+      <span v-if="report.attachmentsInserted || report.originalFilesInserted">
+        {{
+          t('tauriPreview.notes.importedRich', {
+            attachments: report.attachmentsInserted ?? 0,
+            originals: report.originalFilesInserted ?? 0
+          })
+        }}
+      </span>
+    </p>
   </div>
 </template>
 

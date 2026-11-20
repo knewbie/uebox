@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import NotesPanel from './NotesPanel.vue'
+import { MAX_NOTES_MANIFEST_BYTES } from './commands'
 import { createAppI18n } from '../i18n'
 import en from '@renderer/i18n/locales/en-US'
 import zh from '@renderer/i18n/locales/zh-CN'
@@ -290,7 +291,7 @@ it('rejects an oversized legacy file before reading or invoking the host', async
   await flushPromises()
   const file = new File([], 'oversized.json')
   const read = vi.fn()
-  Object.defineProperty(file, 'size', { value: 16 * 1024 * 1024 + 1 })
+  Object.defineProperty(file, 'size', { value: MAX_NOTES_MANIFEST_BYTES + 1 })
   Object.defineProperty(file, 'arrayBuffer', { value: read })
   const picker = wrapper.get('#legacy-notes-file')
   Object.defineProperty(picker.element, 'files', { value: [file] })
@@ -300,4 +301,65 @@ it('rejects an oversized legacy file before reading or invoking the host', async
   expect(wrapper.text()).toContain(en.tauriPreview.notes.importLimit)
   expect(read).not.toHaveBeenCalled()
   expect(ipc).toHaveBeenCalledTimes(2)
+})
+
+it('renders imported HTML in an offline allowlist and exports only the selected attachment', async () => {
+  const strong = 'Imported heading'
+  const html = `<h2>${strong}</h2><a href="https://outside.invalid">link text</a><img src="https://outside.invalid/image"><script>doNotRun()</script><p style="background:url(https://outside.invalid)">paragraph</p>`
+  const attachment = { id: '22', kind: 'binary', fileName: 'sample.txt' }
+  ipc
+    .mockResolvedValueOnce(emptyPage)
+    .mockResolvedValueOnce({ ...emptyPage, items: [standalone] })
+    .mockResolvedValueOnce({
+      ...standalone,
+      content: html,
+      format: 'html',
+      attachments: [attachment]
+    })
+    .mockResolvedValueOnce(true)
+  const wrapper = mountPanel()
+  await flushPromises()
+  await click(wrapper, `[data-note-select="${standalone.id}"]`)
+  const body = wrapper.get('[data-note-content]')
+  expect(body.get('h2').text()).toBe(strong)
+  expect(body.text()).toContain('link text')
+  expect(body.text()).not.toContain('doNotRun')
+  expect(body.find('a, img, script, [style]').exists()).toBe(false)
+  expect(ipc).toHaveBeenCalledTimes(3)
+  await click(wrapper, '.note-attachments button')
+  expect(ipc).toHaveBeenLastCalledWith('export_note_attachment', {
+    noteId: standalone.id,
+    attachmentId: attachment.id
+  })
+  expect(wrapper.text()).toContain('Attachment saved.')
+})
+
+it('requests imported sources only on demand and renders source bodies as inert text', async () => {
+  const source = { id: '14', title: 'Imported document', fileName: 'doc.pdf', kind: 'file' }
+  ipc
+    .mockResolvedValueOnce({ items: [book], nextId: null })
+    .mockResolvedValueOnce(emptyPage)
+    .mockResolvedValueOnce(emptyPage)
+    .mockResolvedValueOnce({ items: [source], nextId: null })
+    .mockResolvedValueOnce({ id: source.id, content: raw })
+    .mockResolvedValueOnce(emptyPage)
+  const wrapper = mountPanel()
+  await flushPromises()
+  await click(wrapper, `[data-notebook-select="${book.id}"]`)
+  expect(ipc).toHaveBeenCalledTimes(3)
+  await click(wrapper, '[data-notebook-sources]')
+  expect(ipc).toHaveBeenLastCalledWith('list_notebook_sources', {
+    notebookId: book.id,
+    afterId: null,
+    limit: 20
+  })
+  await click(wrapper, '[data-notebook-source="14"]')
+  expect(ipc).toHaveBeenLastCalledWith('read_notebook_source', {
+    notebookId: book.id,
+    sourceId: source.id
+  })
+  expect(wrapper.get('.notes-source-text').element.textContent).toBe(raw)
+  expect(wrapper.find('script, a[href]').exists()).toBe(false)
+  await click(wrapper, '[data-notes-standalone]')
+  expect(wrapper.find('[data-notebook-source]').exists()).toBe(false)
 })

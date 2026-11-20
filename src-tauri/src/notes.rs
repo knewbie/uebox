@@ -1,11 +1,14 @@
 //! Offline notebooks and notes in the preview profile.
+pub(crate) mod attachments;
 pub(crate) mod transfer;
 
 use std::{path::PathBuf, sync::Mutex};
 
 use serde::Serialize;
-use tauri::{AppHandle, Manager, Runtime};
-use uebox_notes::{Note, NoteSummary, Notebook, NotesError, NotesStore};
+use tauri::{AppHandle, Manager, Runtime, WebviewWindow};
+use uebox_notes::{
+    AttachmentSummary, Note, NoteSummary, Notebook, NotesError, NotesStore, OriginalFileSummary,
+};
 
 use crate::profile_storage::{
     acquire_lock, checked_file_exists, private_directory, ProfileError, ProfileLock,
@@ -90,6 +93,7 @@ fn notes_error(error: NotesError) -> &'static str {
         NotesError::RecoveryRequired => "notes_recovery_required",
         NotesError::Locked => "notes_locked",
         NotesError::ImportConflict => "notes_import_conflict",
+        NotesError::LimitExceeded => "notes_import_limit",
         _ => UNAVAILABLE,
     }
 }
@@ -172,19 +176,122 @@ pub(crate) struct NoteDetail {
     #[serde(flatten)]
     summary: NoteView,
     content: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    format: Option<uebox_notes::NoteFormat>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    attachments: Vec<NoteAttachment>,
 }
 
-impl From<Note> for NoteDetail {
-    fn from(note: Note) -> Self {
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NoteAttachment {
+    id: String,
+    kind: uebox_notes::AttachmentKind,
+    file_name: Option<String>,
+}
+
+impl From<AttachmentSummary> for NoteAttachment {
+    fn from(attachment: AttachmentSummary) -> Self {
         Self {
+            id: attachment.id.to_string(),
+            kind: attachment.kind,
+            file_name: attachment.file_name,
+        }
+    }
+}
+
+impl NoteDetail {
+    fn load(note: Note, store: &NotesStore) -> Result<Self, &'static str> {
+        Ok(Self {
             summary: NoteView {
                 id: note.id.to_string(),
                 notebook_id: note.notebook_id.map(|id| id.to_string()),
                 title: note.title,
             },
             content: note.content,
+            format: store.note_format(note.id).map_err(notes_error)?,
+            attachments: store
+                .note_attachments(note.id)
+                .map_err(notes_error)?
+                .into_iter()
+                .map(Into::into)
+                .collect(),
+        })
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SourceView {
+    id: String,
+    kind: uebox_notes::ElectronSourceKind,
+    title: String,
+    file_name: Option<String>,
+}
+
+impl From<OriginalFileSummary> for SourceView {
+    fn from(source: OriginalFileSummary) -> Self {
+        Self {
+            id: source.id.to_string(),
+            kind: source.kind,
+            title: source.title,
+            file_name: source.file_name,
         }
     }
+}
+
+#[tauri::command]
+pub(crate) async fn list_notebook_sources<R: Runtime>(
+    window: WebviewWindow<R>,
+    notebook_id: String,
+    after_id: Option<String>,
+    limit: u32,
+) -> Result<Page<SourceView>, &'static str> {
+    if window.label() != "main" {
+        return Err(UNAVAILABLE);
+    }
+    let parent = parse_id(&notebook_id)?;
+    let cursor = optional_id(after_id)?;
+    let count = page_limit(limit)?;
+    NotesHost::run(window.app_handle().clone(), false, move |store| {
+        let rows = store
+            .ok_or(NOT_FOUND)?
+            .list_original_files(parent, cursor, count)
+            .map_err(notes_error)?;
+        Ok(Page::from_rows(rows, limit, |source| source.id))
+    })
+    .await
+}
+
+#[derive(Serialize)]
+pub(crate) struct SourceBody {
+    id: String,
+    content: String,
+}
+
+#[tauri::command]
+pub(crate) async fn read_notebook_source<R: Runtime>(
+    window: WebviewWindow<R>,
+    notebook_id: String,
+    source_id: String,
+) -> Result<SourceBody, &'static str> {
+    if window.label() != "main" {
+        return Err(UNAVAILABLE);
+    }
+    let parent = parse_id(&notebook_id)?;
+    let id = parse_id(&source_id)?;
+    NotesHost::run(window.app_handle().clone(), false, move |store| {
+        let source = store
+            .ok_or(NOT_FOUND)?
+            .get_original_file(parent, id)
+            .map_err(notes_error)?
+            .ok_or(NOT_FOUND)?;
+        Ok(SourceBody {
+            id: source.id.to_string(),
+            content: source.content,
+        })
+    })
+    .await
 }
 
 #[tauri::command]
@@ -235,12 +342,9 @@ pub(crate) async fn get_note<R: Runtime>(
 ) -> Result<NoteDetail, &'static str> {
     let id = parse_id(&note_id)?;
     NotesHost::run(app, false, move |store| {
-        store
-            .ok_or(NOT_FOUND)?
-            .get_note(id)
-            .map_err(notes_error)?
-            .map(Into::into)
-            .ok_or(NOT_FOUND)
+        let store = store.ok_or(NOT_FOUND)?;
+        let note = store.get_note(id).map_err(notes_error)?.ok_or(NOT_FOUND)?;
+        NoteDetail::load(note, store)
     })
     .await
 }
@@ -293,30 +397,36 @@ pub(crate) async fn save_note<R: Runtime>(
     visible_text(&content, 4 * 1024 * 1024)?;
     NotesHost::run(app, id.is_none() && parent.is_none(), move |store| {
         let store = store.ok_or(NOT_FOUND)?;
-        let id = if let Some(id) = id {
+        if let Some(id) = id {
             let old = store.get_note(id).map_err(notes_error)?.ok_or(NOT_FOUND)?;
             if old.notebook_id != parent {
                 return Err("notes_parent_changed");
             }
+            let mut view = NoteDetail::load(old, store)?;
             if !store
                 .update_note(id, &title, &content)
                 .map_err(notes_error)?
             {
                 return Err(NOT_FOUND);
             }
-            id
+            view.summary.title = title;
+            view.content = content;
+            Ok(view)
         } else {
-            store
+            let id = store
                 .create_note(parent, &title, &content)
-                .map_err(notes_error)?
-        };
-        Ok(Note {
-            id,
-            notebook_id: parent,
-            title,
-            content,
+                .map_err(notes_error)?;
+            Ok(NoteDetail {
+                summary: NoteView {
+                    id: id.to_string(),
+                    notebook_id: parent.map(|id| id.to_string()),
+                    title,
+                },
+                content,
+                format: None,
+                attachments: Vec::new(),
+            })
         }
-        .into())
     })
     .await
 }
@@ -483,5 +593,85 @@ mod tests {
         let mut conflict = manifest;
         conflict["notes"][0]["content"] = json!("different");
         assert_eq!(import(&conflict).unwrap_err(), "notes_import_conflict");
+
+        let rich = json!({
+            "format":"uebox-notes", "version":2, "source":"electron-public-notes",
+            "notebooks":[{"identity":"sources-fixture","title":"Imported source notebook"}],
+            "originalFiles":[{
+                "identity":"source-fixture","notebookIdentity":"sources-fixture","kind":"file",
+                "title":"Imported source","content":"<script>inert</script>","rawContent":"private raw",
+                "fileName":"sample.txt","filePath":"/absolute/sample.txt","sourceUrl":null,"mediaUrl":null
+            }],
+            "notes":[{
+                "identity":"note:rich", "notebookIdentity":null, "title":"Rich fixture",
+                "format":"html", "content":"<p><strong>Visible text</strong></p>",
+                "attachments":[{
+                    "kind":"binary","mediaType":"text/plain","fileName":"fixture.txt","bytes":"YWJj",
+                    "sha256":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+                }]
+            }]
+        });
+        let result = import(&rich).unwrap();
+        assert_eq!(result["notesInserted"], 1);
+        assert_eq!(result["attachmentsInserted"], 1);
+        assert_eq!(result["originalFilesInserted"], 1);
+        let notebooks = invoke("list_notebooks", json!({"afterId":null,"limit":20})).unwrap();
+        let source_book = &notebooks["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|book| book["title"] == "Imported source notebook")
+            .unwrap()["id"];
+        let sources = invoke(
+            "list_notebook_sources",
+            json!({"notebookId":source_book,"afterId":null,"limit":20}),
+        )
+        .unwrap();
+        let source_id = &sources["items"][0]["id"];
+        assert_eq!(sources["items"][0]["fileName"], "sample.txt");
+        assert!(sources["items"][0].get("content").is_none());
+        assert!(sources["items"][0].get("filePath").is_none());
+        assert_eq!(
+            invoke(
+                "read_notebook_source",
+                json!({"notebookId":source_book,"sourceId":source_id})
+            )
+            .unwrap(),
+            json!({"id":source_id,"content":"<script>inert</script>"})
+        );
+        assert_eq!(
+            invoke(
+                "read_notebook_source",
+                json!({"notebookId":second["id"],"sourceId":source_id})
+            )
+            .unwrap_err(),
+            "notes_not_found"
+        );
+        let notes = invoke(
+            "list_notes",
+            json!({
+                "notebookId":null, "afterId":null, "limit":20
+            }),
+        )
+        .unwrap();
+        let rich_id = &notes["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|note| note["title"] == "Rich fixture")
+            .unwrap()["id"];
+        let imported = invoke("get_note", json!({"noteId": rich_id})).unwrap();
+        assert_eq!(imported["format"], "html");
+        assert_eq!(imported["attachments"][0]["fileName"], "fixture.txt");
+        assert!(imported["attachments"][0].get("bytes").is_none());
+        let modified = invoke(
+            "save_note",
+            json!({
+                "id":rich_id, "notebookId":null, "title":"Saved fixture","content":"<p>Edited</p>"
+            }),
+        )
+        .unwrap();
+        assert_eq!(modified["format"], "html");
+        assert_eq!(modified["attachments"], imported["attachments"]);
     }
 }

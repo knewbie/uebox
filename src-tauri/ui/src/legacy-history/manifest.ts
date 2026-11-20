@@ -6,15 +6,15 @@ export class ManifestReadError extends Error {
   }
 }
 
-export async function readLegacyManifest(file: File): Promise<string> {
-  if (file.size > MAX_MANIFEST_BYTES) throw new ManifestReadError('tooLarge')
+export async function readLegacyManifest(file: File, limit = MAX_MANIFEST_BYTES): Promise<string> {
+  if (file.size > limit) throw new ManifestReadError('tooLarge')
   let bytes: ArrayBuffer
   try {
     bytes = await file.arrayBuffer()
   } catch {
     throw new ManifestReadError('readFailed')
   }
-  if (bytes.byteLength > MAX_MANIFEST_BYTES) throw new ManifestReadError('tooLarge')
+  if (bytes.byteLength > limit) throw new ManifestReadError('tooLarge')
   try {
     return new TextDecoder('utf-8', { fatal: true }).decode(bytes)
   } catch {

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Runtime};
-use uebox_notes::{LegacyNote, LegacyNotebook, NoteImportSummary};
+use uebox_notes::{LegacyNote, LegacyNotebook, NoteImportSummary, V2Handoff, V2ImportSummary};
 
 use super::{notes_error, NotesHost, INVALID, UNAVAILABLE};
 
@@ -37,6 +37,16 @@ pub(crate) struct ImportReport {
     notebooks_existing: u32,
     notes_inserted: u32,
     notes_existing: u32,
+    #[serde(skip_serializing_if = "is_zero")]
+    attachments_inserted: u32,
+    #[serde(skip_serializing_if = "is_zero")]
+    original_files_inserted: u32,
+    #[serde(skip_serializing_if = "is_zero")]
+    original_files_existing: u32,
+}
+
+fn is_zero(value: &u32) -> bool {
+    *value == 0
 }
 
 impl From<NoteImportSummary> for ImportReport {
@@ -46,7 +56,50 @@ impl From<NoteImportSummary> for ImportReport {
             notebooks_existing: result.notebooks_existing,
             notes_inserted: result.notes_inserted,
             notes_existing: result.notes_existing,
+            ..Self::default()
         }
+    }
+}
+
+impl From<V2ImportSummary> for ImportReport {
+    fn from(result: V2ImportSummary) -> Self {
+        Self {
+            notebooks_inserted: result.notebooks_inserted,
+            notebooks_existing: result.notebooks_existing,
+            notes_inserted: result.notes_inserted,
+            notes_existing: result.notes_existing,
+            attachments_inserted: result.attachments_inserted,
+            original_files_inserted: result.original_files_inserted,
+            original_files_existing: result.original_files_existing,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct Version {
+    version: u32,
+}
+
+enum Handoff {
+    Original(Manifest),
+    Rich(V2Handoff),
+}
+
+fn parse_handoff(manifest: &str) -> Result<Handoff, &'static str> {
+    if manifest.len() > 64 * 1024 * 1024 {
+        return Err("notes_import_limit");
+    }
+    let Version { version } = serde_json::from_str(manifest).map_err(|_| INVALID)?;
+    match version {
+        1 => parse(manifest).map(Handoff::Original),
+        2 => {
+            let document: V2Handoff = serde_json::from_str(manifest).map_err(|_| INVALID)?;
+            if document.format != "uebox-notes" || document.source != "electron-public-notes" {
+                return Err(INVALID);
+            }
+            Ok(Handoff::Rich(document))
+        }
+        _ => Err("notes_import_version"),
     }
 }
 
@@ -83,7 +136,28 @@ pub(crate) async fn import_legacy_notes<R: Runtime>(
     app: AppHandle<R>,
     manifest: String,
 ) -> Result<ImportReport, &'static str> {
-    let document = parse(&manifest)?;
+    let document = tauri::async_runtime::spawn_blocking(move || parse_handoff(&manifest))
+        .await
+        .map_err(|_| UNAVAILABLE)??;
+    let document = match document {
+        Handoff::Original(document) => document,
+        Handoff::Rich(document) => {
+            if document.notebooks.is_empty()
+                && document.notes.is_empty()
+                && document.original_files.is_empty()
+            {
+                return Ok(ImportReport::default());
+            }
+            return NotesHost::run(app, true, move |store| {
+                store
+                    .ok_or(UNAVAILABLE)?
+                    .import_v2(&document)
+                    .map(Into::into)
+                    .map_err(notes_error)
+            })
+            .await;
+        }
+    };
     if document.notebooks.is_empty() && document.notes.is_empty() {
         return Ok(ImportReport::default());
     }
