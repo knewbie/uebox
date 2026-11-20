@@ -1,11 +1,18 @@
-use crate::{AssistantMessage, Cancellation, Error, Message, ModelEvent, OpenAiProvider};
+use crate::mutation::{MutationAttempt, MutationPolicy};
+use crate::{
+    ApprovalDecision, AssistantMessage, Cancellation, Error, Message, ModelEvent, MutationReceipt,
+    MutationSettlementHook, MutationSkipReason, MutationStatus, MutationTool, OpenAiProvider,
+    PreparedMutation, ToolApprovalRequest, ToolApprover, ToolCall,
+};
 use serde_json::{json, Value};
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
     future::Future,
     pin::Pin,
     sync::{Arc, Mutex, OnceLock, Weak},
+    time::Duration,
 };
+use tokio::time::{self, Instant};
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub enum Engine {
@@ -99,7 +106,12 @@ impl jsonschema::Retrieve for DenyExternalSchemas {
 struct RegisteredTool {
     definition: ToolDefinition,
     validator: jsonschema::Validator,
-    executor: Arc<dyn ReadOnlyTool>,
+    executor: ToolExecutor,
+}
+
+enum ToolExecutor {
+    ReadOnly(Arc<dyn ReadOnlyTool>),
+    Mutation(Arc<dyn MutationTool>),
 }
 type InstanceKey = (Engine, String);
 type InstanceGate = tokio::sync::Mutex<()>;
@@ -124,6 +136,7 @@ pub struct ToolRegistry {
     target: RunTarget,
     tools: BTreeMap<String, RegisteredTool>,
     gate: Arc<InstanceGate>,
+    mutation_policy: Option<MutationPolicy>,
 }
 impl ToolRegistry {
     pub fn new(target: RunTarget) -> Self {
@@ -132,6 +145,7 @@ impl ToolRegistry {
             target,
             tools: BTreeMap::new(),
             gate,
+            mutation_policy: None,
         }
     }
     pub fn register(
@@ -139,6 +153,43 @@ impl ToolRegistry {
         engine: Engine,
         definition: ToolDefinition,
         tool: Arc<dyn ReadOnlyTool>,
+    ) -> Result<(), Error> {
+        self.register_tool(engine, definition, ToolExecutor::ReadOnly(tool))
+    }
+
+    pub fn register_mutation(
+        &mut self,
+        engine: Engine,
+        definition: ToolDefinition,
+        tool: Arc<dyn MutationTool>,
+    ) -> Result<(), Error> {
+        self.register_tool(engine, definition, ToolExecutor::Mutation(tool))
+    }
+
+    /// Configure approvals and a nonblocking host hook for final receipts.
+    /// The timeout includes waiting to reacquire the instance gate.
+    pub fn with_mutation_approval(
+        mut self,
+        approver: Arc<dyn ToolApprover>,
+        timeout: Duration,
+        on_settled: MutationSettlementHook,
+    ) -> Result<Self, Error> {
+        if timeout.is_zero() || std::time::Instant::now().checked_add(timeout).is_none() {
+            return Err(Error::InvalidConfig);
+        }
+        self.mutation_policy = Some(MutationPolicy {
+            approver,
+            timeout,
+            on_settled,
+        });
+        Ok(self)
+    }
+
+    fn register_tool(
+        &mut self,
+        engine: Engine,
+        definition: ToolDefinition,
+        executor: ToolExecutor,
     ) -> Result<(), Error> {
         if engine != self.target.engine {
             return Err(Error::WrongEngine);
@@ -169,7 +220,7 @@ impl ToolRegistry {
             RegisteredTool {
                 definition,
                 validator,
-                executor: tool,
+                executor,
             },
         );
         Ok(())
@@ -230,7 +281,13 @@ impl AgentSession {
         validator: Arc<TargetValidator>,
         max_steps: usize,
     ) -> Result<Self, Error> {
-        if max_steps == 0 {
+        if max_steps == 0
+            || (registry.mutation_policy.is_none()
+                && registry
+                    .tools
+                    .values()
+                    .any(|tool| matches!(tool.executor, ToolExecutor::Mutation(_))))
+        {
             return Err(Error::InvalidConfig);
         }
         Ok(Self {
@@ -338,6 +395,7 @@ impl Run {
     where
         F: FnMut(ModelEvent),
     {
+        let mut mutation_calls = HashSet::new();
         for step in 0..self.inner.max_steps {
             if self.cancel.is_cancelled() {
                 return Err(Error::Cancelled);
@@ -388,80 +446,7 @@ impl Run {
             let mut results = Vec::new();
             self.set_phase(RunPhase::ValidatingTools);
             for call in &assistant.tool_calls {
-                if self.cancel.is_cancelled() {
-                    return Err(Error::Cancelled);
-                }
-                if !(self.inner.validator)(&self.inner.registry.target) {
-                    return Err(Error::TargetChanged);
-                }
-                let (mut content, is_error) = match self.inner.registry.tools.get(&call.name) {
-                    None => (json!({"ok":false,"error":"tool_not_allowed"}), true),
-                    Some(tool) => match serde_json::from_str::<Value>(&call.arguments) {
-                        Ok(arguments)
-                            if arguments.is_object() && tool.validator.is_valid(&arguments) =>
-                        {
-                            self.set_phase(RunPhase::RunningTools);
-                            let permit = tokio::select! {
-                                biased;
-                                _ = self.cancel.cancelled() => return Err(Error::Cancelled),
-                                permit = self.inner.registry.gate.clone().lock_owned() => permit,
-                            };
-                            if self.cancel.is_cancelled() {
-                                return Err(Error::Cancelled);
-                            }
-                            if !(self.inner.validator)(&self.inner.registry.target) {
-                                return Err(Error::TargetChanged);
-                            }
-                            self.inner.state.lock().unwrap().pending_tool = true;
-                            let pending = PendingTool {
-                                inner: self.inner.clone(),
-                                id: self.id,
-                                _permit: permit,
-                            };
-                            let executor = tool.executor.clone();
-                            let target = self.inner.registry.target.clone();
-                            let validator = self.inner.validator.clone();
-                            let cancel = self.cancel.clone();
-                            let mut task = tokio::spawn(async move {
-                                let _pending = pending;
-                                if cancel.is_cancelled() {
-                                    return Err(Error::Cancelled);
-                                }
-                                if !validator(&target) {
-                                    return Err(Error::TargetChanged);
-                                }
-                                if cancel.is_cancelled() {
-                                    return Err(Error::Cancelled);
-                                }
-                                let admitted = cancel.admit()?;
-                                Ok(admitted
-                                    .deliver(|| executor.execute(target, arguments))
-                                    .await)
-                            });
-                            let result = tokio::select! {
-                                biased;
-                                _ = self.cancel.cancelled() => return Err(Error::Cancelled),
-                                result = &mut task => match result {
-                                    Ok(Ok(result)) => result,
-                                    Ok(Err(error)) => return Err(error),
-                                    Err(_) => Err(ToolError),
-                                },
-                            };
-                            if self.cancel.is_cancelled() {
-                                return Err(Error::Cancelled);
-                            }
-                            if !(self.inner.validator)(&self.inner.registry.target) {
-                                return Err(Error::TargetChanged);
-                            }
-                            self.set_phase(RunPhase::ValidatingTools);
-                            match result {
-                                Ok(value) => (json!({"ok":true,"data":value}), false),
-                                Err(_) => (json!({"ok":false,"error":"tool_failed"}), true),
-                            }
-                        }
-                        _ => (json!({"ok":false,"error":"invalid_arguments"}), true),
-                    },
-                };
+                let (mut content, is_error) = self.dispatch_tool(call, &mut mutation_calls).await?;
                 content["target"] = self.inner.registry.target.as_value();
                 results.push(Message::Tool {
                     call_id: call.id.clone(),
@@ -487,9 +472,243 @@ impl Run {
         }
         Err(Error::StepLimit)
     }
+
+    async fn dispatch_tool(
+        &self,
+        call: &ToolCall,
+        mutation_calls: &mut HashSet<String>,
+    ) -> Result<(Value, bool), Error> {
+        self.check_target()?;
+        let Some(tool) = self.inner.registry.tools.get(&call.name) else {
+            return Ok((json!({"ok":false,"error":"tool_not_allowed"}), true));
+        };
+        let arguments = match serde_json::from_str::<Value>(&call.arguments) {
+            Ok(arguments) if arguments.is_object() && tool.validator.is_valid(&arguments) => {
+                arguments
+            }
+            _ => return Ok((json!({"ok":false,"error":"invalid_arguments"}), true)),
+        };
+        match &tool.executor {
+            ToolExecutor::ReadOnly(executor) => {
+                let executor = executor.clone();
+                let result = self
+                    .run_read_work(move |target| executor.execute(target, arguments))
+                    .await?;
+                Ok(match result {
+                    Ok(value) => (json!({"ok":true,"data":value}), false),
+                    Err(_) => (json!({"ok":false,"error":"tool_failed"}), true),
+                })
+            }
+            ToolExecutor::Mutation(executor) if mutation_calls.insert(call.id.clone()) => {
+                self.execute_mutation(executor.clone(), call, arguments)
+                    .await
+            }
+            ToolExecutor::Mutation(_) => Ok((
+                json!({"ok":false,"status":"not_executed","error":"duplicate_tool_call"}),
+                true,
+            )),
+        }
+    }
+
+    fn pending(&self, permit: tokio::sync::OwnedMutexGuard<()>) -> PendingTool {
+        self.inner.state.lock().unwrap().pending_tool = true;
+        PendingTool {
+            inner: self.inner.clone(),
+            id: self.id,
+            _permit: permit,
+        }
+    }
+
+    fn check_target(&self) -> Result<(), Error> {
+        check_current(
+            &self.cancel,
+            &*self.inner.validator,
+            &self.inner.registry.target,
+        )
+    }
+
+    // Read-only tools and mutation preparation may both perform blocking reads.
+    // A detached task owns the gate until that work is really done.
+    async fn run_read_work<T, F>(
+        &self,
+        work: impl FnOnce(RunTarget) -> F + Send + 'static,
+    ) -> Result<Result<T, ToolError>, Error>
+    where
+        T: Send + 'static,
+        F: Future<Output = Result<T, ToolError>> + Send + 'static,
+    {
+        self.set_phase(RunPhase::RunningTools);
+        let permit = tokio::select! {
+            biased;
+            _ = self.cancel.cancelled() => return Err(Error::Cancelled),
+            permit = self.inner.registry.gate.clone().lock_owned() => permit,
+        };
+        self.check_target()?;
+        let pending = self.pending(permit);
+        let target = self.inner.registry.target.clone();
+        let validator = self.inner.validator.clone();
+        let cancel = self.cancel.clone();
+        let mut task = tokio::spawn(async move {
+            let _pending = pending;
+            check_current(&cancel, &*validator, &target)?;
+            let admitted = cancel.admit()?;
+            Ok(admitted.deliver(|| work(target)).await)
+        });
+        let result = tokio::select! {
+            biased;
+            _ = self.cancel.cancelled() => return Err(Error::Cancelled),
+            result = &mut task => match result {
+                Ok(result) => result?,
+                Err(_) => Err(ToolError),
+            },
+        };
+        self.check_target()?;
+        self.set_phase(RunPhase::ValidatingTools);
+        Ok(result)
+    }
+
+    async fn await_approval<T>(
+        &self,
+        deadline: Instant,
+        work: impl Future<Output = T>,
+    ) -> Result<T, MutationSkipReason> {
+        tokio::pin!(work);
+        let mut checks = time::interval(Duration::from_millis(50));
+        checks.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
+        loop {
+            tokio::select! {
+                biased;
+                _ = self.cancel.cancelled() => return Err(MutationSkipReason::Cancelled),
+                _ = time::sleep_until(deadline) => return Err(MutationSkipReason::Expired),
+                _ = checks.tick() => self.check_target().map_err(skip_reason)?,
+                value = &mut work => {
+                    self.check_target().map_err(skip_reason)?;
+                    return Ok(value);
+                }
+            }
+        }
+    }
+
+    async fn execute_mutation(
+        &self,
+        executor: Arc<dyn MutationTool>,
+        call: &ToolCall,
+        arguments: Value,
+    ) -> Result<(Value, bool), Error> {
+        let policy = self
+            .inner
+            .registry
+            .mutation_policy
+            .as_ref()
+            .ok_or(Error::InvalidConfig)?;
+        let target = self.inner.registry.target.clone();
+        let mut attempt = MutationAttempt::new(
+            self.id,
+            &call.id,
+            &call.name,
+            target.clone(),
+            policy.on_settled.clone(),
+        )?;
+        let PreparedMutation {
+            title,
+            preview,
+            execute,
+        } = match self
+            .run_read_work(move |target| executor.prepare(target, arguments))
+            .await
+        {
+            Ok(Ok(prepared)) if !prepared.title.trim().is_empty() => prepared,
+            Ok(_) => return attempt.skip(MutationSkipReason::PrepareFailed),
+            Err(error) => return attempt.skip(skip_reason(error)),
+        };
+        let deadline = Instant::now()
+            .checked_add(policy.timeout)
+            .ok_or(Error::InvalidConfig)?;
+        let request = ToolApprovalRequest {
+            invocation: attempt.invocation().clone(),
+            title,
+            preview,
+            deadline: deadline.into_std(),
+        };
+        match self
+            .await_approval(deadline, async { policy.approver.approve(request).await })
+            .await
+        {
+            Ok(ApprovalDecision::Approve) => {}
+            Ok(ApprovalDecision::Deny) => return attempt.skip(MutationSkipReason::Denied),
+            Err(reason) => return attempt.skip(reason),
+        }
+        self.set_phase(RunPhase::RunningTools);
+        let permit = match self
+            .await_approval(deadline, self.inner.registry.gate.clone().lock_owned())
+            .await
+        {
+            Ok(permit) => permit,
+            Err(reason) => {
+                self.set_phase(RunPhase::ValidatingTools);
+                return attempt.skip(reason);
+            }
+        };
+        let pending = self.pending(permit);
+        let validator = self.inner.validator.clone();
+        let cancel = self.cancel.clone();
+        let mut task = tokio::spawn(async move {
+            let _pending = pending;
+            if let Err(error) = check_current(&cancel, &*validator, &target) {
+                return attempt.skip(skip_reason(error));
+            }
+            if Instant::now() >= deadline {
+                return attempt.skip(MutationSkipReason::Expired);
+            }
+            let admitted = match cancel.admit() {
+                Ok(admitted) => admitted,
+                Err(error) => return attempt.skip(skip_reason(error)),
+            };
+            attempt.mark_dispatched();
+            let receipt = admitted.deliver(execute).await;
+            Ok(attempt.finish(receipt))
+        });
+        let result = tokio::select! {
+            biased;
+            _ = self.cancel.cancelled() => return Err(Error::Cancelled),
+            result = &mut task => match result {
+                Ok(result) => result?,
+                Err(_) => MutationReceipt::without_data(MutationStatus::Unknown).wire(),
+            },
+        };
+        self.check_target()?;
+        self.set_phase(RunPhase::ValidatingTools);
+        Ok(result)
+    }
 }
+
+fn check_current(
+    cancel: &Cancellation,
+    validator: &TargetValidator,
+    target: &RunTarget,
+) -> Result<(), Error> {
+    if cancel.is_cancelled() {
+        return Err(Error::Cancelled);
+    }
+    if !validator(target) {
+        return Err(Error::TargetChanged);
+    }
+    Ok(())
+}
+
+fn skip_reason(error: Error) -> MutationSkipReason {
+    match error {
+        Error::Cancelled => MutationSkipReason::Cancelled,
+        Error::TargetChanged => MutationSkipReason::TargetChanged,
+        _ => MutationSkipReason::Abandoned,
+    }
+}
+
 impl Drop for Run {
     fn drop(&mut self) {
+        if !self.finished {
+            self.cancel.cancel();
+        }
         let mut state = self.inner.state.lock().unwrap();
         if state.active == Some(self.id) {
             if !self.finished {
@@ -522,6 +741,9 @@ impl Drop for PendingTool {
         }
     }
 }
+
+#[cfg(test)]
+mod mutation_tests;
 
 #[cfg(test)]
 mod tests {

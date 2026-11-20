@@ -86,6 +86,7 @@ export default {
       assistant: '助手',
       phase: {
         running: '正在回复…',
+        awaiting_approval: '正在等待你的批准…',
         cancelling: '正在取消…',
         draining: '正在等待进行中的读取结束…',
         completed: '已完成',
@@ -147,6 +148,22 @@ export default {
     unreal: {
       title: 'Unreal Engine 只读查询',
       assistantRoot: '确认助手要读取的项目目录绝对路径',
+      actorApproval: {
+        assistantTitle: '支持 Actor 标签审批的 Unreal Engine 助手',
+        optIn: '允许助手请求批准修改所选 Actor 的标签',
+        title: 'Actor 标签变更',
+        previous: '当前标签为「{label}」',
+        proposed: '申请将标签改为「{label}」',
+        approve: '批准本次标签变更',
+        deny: '拒绝',
+        unavailable: '此审批已过期或不可用。',
+        receipt: {
+          applied: '编辑器读回标签「{label}」。请在 Unreal Engine 中确认并保存关卡。',
+          mismatch: '编辑器读回了不同的标签「{label}」。请在 Unreal Engine 中检查该 Actor。',
+          not_executed: '本次标签变更未执行。',
+          unknown: '结果未知。请在 Unreal Engine 中检查该 Actor 后再编辑。'
+        }
+      },
       intro:
         '手动启动本地监听，刷新已登记实例并选择一个项目后，可读取项目详情。不会自动选择或重试。',
       trust: '本地连接不验证插件身份；其他本机进程也可能连接或冒充插件。',

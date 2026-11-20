@@ -85,7 +85,7 @@ describe('Tauri migration preview', () => {
     await wrapper.get('input[name="unity-port"]').setValue('55234')
     expect(wrapper.get('[data-unity-attach-agent]').attributes('disabled')).toBeDefined()
     expect(invoke).not.toHaveBeenCalled()
-    await wrapper.get('button[role="checkbox"]').trigger('click')
+    await wrapper.get('#unity-heading ~ form button[role="checkbox"]').trigger('click')
     await wrapper.get('[data-unity-attach-agent]').trigger('click')
     await flushPromises()
     expect(invoke).toHaveBeenCalledExactlyOnceWith('attach_unity_agent_target', {
@@ -140,7 +140,7 @@ describe('Tauri migration preview', () => {
 
     await wrapper.get('input[name="unity-project"]').setValue('/tmp/Unity fixture')
     await wrapper.get('input[name="unity-port"]').setValue('55234')
-    await wrapper.get('button[role="checkbox"]').trigger('click')
+    await wrapper.get('#unity-heading ~ form button[role="checkbox"]').trigger('click')
     await wrapper.get('[data-unity-attach-agent]').trigger('click')
     await flushPromises()
     await wrapper.get('[data-unity-release-agent]').trigger('click')
@@ -723,7 +723,7 @@ describe('Tauri migration preview', () => {
 
     await wrapper.get('input[name="unity-project"]').setValue('/tmp/Unity fixture')
     await wrapper.get('input[name="unity-port"]').setValue('55234')
-    await wrapper.get('button[role="checkbox"]').trigger('click')
+    await wrapper.get('#unity-heading ~ form button[role="checkbox"]').trigger('click')
     expect(wrapper.get('[data-unity-query]').attributes('disabled')).toBeUndefined()
     await wrapper.get('form').trigger('submit')
     await flushPromises()
@@ -750,16 +750,16 @@ describe('Tauri migration preview', () => {
 
     await wrapper.get('input[name="unity-project"]').setValue('/tmp/Unity fixture')
     await wrapper.get('input[name="unity-port"]').setValue('55234')
-    await wrapper.get('button[role="checkbox"]').trigger('click')
+    await wrapper.get('#unity-heading ~ form button[role="checkbox"]').trigger('click')
     expect(wrapper.get('[data-unity-query]').attributes('disabled')).toBeUndefined()
     await wrapper.get('input[name="unity-port"]').setValue('55235')
     expect(wrapper.get('[data-unity-query]').attributes('disabled')).toBeDefined()
-    await wrapper.get('button[role="checkbox"]').trigger('click')
+    await wrapper.get('#unity-heading ~ form button[role="checkbox"]').trigger('click')
     await wrapper.get('input[name="unity-port"]').setValue('65536')
     expect(wrapper.get('[data-unity-query]').attributes('disabled')).toBeDefined()
     await wrapper.get('input[name="unity-port"]').setValue('55235')
     await wrapper.get('input[name="unity-project"]').setValue('relative/project')
-    await wrapper.get('button[role="checkbox"]').trigger('click')
+    await wrapper.get('#unity-heading ~ form button[role="checkbox"]').trigger('click')
     expect(wrapper.get('[data-unity-query]').attributes('disabled')).toBeDefined()
     expect(vi.mocked(inspectUnity)).not.toHaveBeenCalled()
     wrapper.unmount()
@@ -778,12 +778,14 @@ describe('Tauri migration preview', () => {
 
     await wrapper.get('input[name="unity-project"]').setValue('/tmp/Unity fixture')
     await wrapper.get('input[name="unity-port"]').setValue('55234')
-    await wrapper.get('button[role="checkbox"]').trigger('click')
+    await wrapper.get('#unity-heading ~ form button[role="checkbox"]').trigger('click')
     await wrapper.get('form').trigger('submit')
     await wrapper.get('form').trigger('submit')
     expect(vi.mocked(inspectUnity)).toHaveBeenCalledTimes(1)
     expect(wrapper.get('input[name="unity-port"]').attributes('disabled')).toBeDefined()
-    expect(wrapper.get('button[role="checkbox"]').attributes('disabled')).toBeDefined()
+    expect(
+      wrapper.get('#unity-heading ~ form button[role="checkbox"]').attributes('disabled')
+    ).toBeDefined()
 
     finish(unitySnapshot)
     await flushPromises()
@@ -806,7 +808,7 @@ describe('Tauri migration preview', () => {
     await flushPromises()
     await wrapper.get('input[name="unity-project"]').setValue('/tmp/Unity fixture')
     await wrapper.get('input[name="unity-port"]').setValue('55234')
-    await wrapper.get('button[role="checkbox"]').trigger('click')
+    await wrapper.get('#unity-heading ~ form button[role="checkbox"]').trigger('click')
     await wrapper.get('form').trigger('submit')
     expect(wrapper.get('[data-unity-query]').attributes('disabled')).toBeDefined()
 
@@ -846,7 +848,7 @@ describe('Tauri migration preview', () => {
 
     await wrapper.get('input[name="unity-project"]').setValue('/tmp/Unity fixture')
     await wrapper.get('input[name="unity-port"]').setValue('55234')
-    await wrapper.get('button[role="checkbox"]').trigger('click')
+    await wrapper.get('#unity-heading ~ form button[role="checkbox"]').trigger('click')
     expect(wrapper.get('[data-unity-query]').attributes('disabled')).toBeUndefined()
     await wrapper.get('form').trigger('submit')
     await flushPromises()
@@ -865,10 +867,10 @@ describe('Tauri migration preview', () => {
     await flushPromises()
     await wrapper.get('input[name="unity-project"]').setValue('C:\\Projects\\Fixture')
     await wrapper.get('input[name="unity-port"]').setValue('55234')
-    await wrapper.get('button[role="checkbox"]').trigger('click')
+    await wrapper.get('#unity-heading ~ form button[role="checkbox"]').trigger('click')
     expect(wrapper.get('[data-unity-query]').attributes('disabled')).toBeUndefined()
     await wrapper.get('input[name="unity-project"]').setValue('/tmp/Unity fixture')
-    await wrapper.get('button[role="checkbox"]').trigger('click')
+    await wrapper.get('#unity-heading ~ form button[role="checkbox"]').trigger('click')
     expect(wrapper.get('[data-unity-query]').attributes('disabled')).toBeDefined()
     expect(inspectUnity).not.toHaveBeenCalled()
     wrapper.unmount()
@@ -880,7 +882,7 @@ describe('Tauri migration preview', () => {
     await flushPromises()
     await wrapper.get('input[name="unity-project"]').setValue('/tmp/Unity fixture')
     await wrapper.get('input[name="unity-port"]').setValue('55234')
-    await wrapper.get('button[role="checkbox"]').trigger('click')
+    await wrapper.get('#unity-heading ~ form button[role="checkbox"]').trigger('click')
     expect(wrapper.get('[data-unity-query]').attributes('disabled')).toBeUndefined()
     wrapper.unmount()
   })
@@ -896,7 +898,7 @@ describe('Tauri migration preview', () => {
 
     await wrapper.get('input[name="unity-project"]').setValue('/tmp/Unity fixture')
     await wrapper.get('input[name="unity-port"]').setValue('55234')
-    await wrapper.get('button[role="checkbox"]').trigger('click')
+    await wrapper.get('#unity-heading ~ form button[role="checkbox"]').trigger('click')
     await wrapper.get('form').trigger('submit')
     await flushPromises()
 
@@ -916,13 +918,13 @@ describe('Tauri migration preview', () => {
 
     await wrapper.get('input[name="unity-project"]').setValue('/tmp/Unity fixture')
     await wrapper.get('input[name="unity-port"]').setValue('55234')
-    await wrapper.get('button[role="checkbox"]').trigger('click')
+    await wrapper.get('#unity-heading ~ form button[role="checkbox"]').trigger('click')
     expect(wrapper.get('[data-unity-query]').attributes('disabled')).toBeUndefined()
     await wrapper.get('form').trigger('submit')
     await flushPromises()
     expect(wrapper.text()).toContain('Fixture scene')
 
-    await wrapper.get('button[role="checkbox"]').trigger('click')
+    await wrapper.get('#unity-heading ~ form button[role="checkbox"]').trigger('click')
     await wrapper.get('form').trigger('submit')
     await flushPromises()
 

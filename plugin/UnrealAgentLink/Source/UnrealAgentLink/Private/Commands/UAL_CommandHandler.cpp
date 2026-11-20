@@ -53,7 +53,7 @@ TSharedPtr<FJsonObject> FUAL_CommandHandler::BuildProjectInfo() const
 	return FUAL_EditorCommands::BuildProjectInfo();
 }
 
-void FUAL_CommandHandler::ProcessMessage(const FString& JsonPayload)
+void FUAL_CommandHandler::ProcessMessage(const FString& JsonPayload, uint64 SocketEpoch)
 {
 	if (!IsInGameThread())
 	{
@@ -62,9 +62,9 @@ void FUAL_CommandHandler::ProcessMessage(const FString& JsonPayload)
 		// 会触发 TaskGraph 递归保护断言崩溃 (++Queue(QueueIndex).RecursionGuard == 1)
 		// 使用 Ticker 可以确保代码在正常的 Tick 上下文中执行，脱离 TaskGraph
 		FTSTicker::GetCoreTicker().AddTicker(
-			FTickerDelegate::CreateLambda([this, Payload = JsonPayload](float DeltaTime) -> bool
+			FTickerDelegate::CreateLambda([this, Payload = JsonPayload, SocketEpoch](float DeltaTime) -> bool
 			{
-				ProcessMessage(Payload);
+				ProcessMessage(Payload, SocketEpoch);
 				return false; // 只执行一次
 			}),
 			0.0f // 立即在下一个 Tick 执行
@@ -118,6 +118,18 @@ void FUAL_CommandHandler::ProcessMessage(const FString& JsonPayload)
 		{
 			UE_LOG(LogUALCommand, Verbose, TEXT("Ignore non-request message: %s"), *Type);
 		}
+		return;
+	}
+
+	if (Method == TEXT("actor.prepare_label"))
+	{
+		FUAL_ActorCommands::Handle_PrepareActorLabel(ParamsObj ? *ParamsObj : nullptr, RequestId, SocketEpoch);
+		return;
+	}
+	if (Method == TEXT("actor.set_property") && ParamsObj && ParamsObj->IsValid()
+		&& (*ParamsObj)->HasField(TEXT("guarded_actor_label")))
+	{
+		FUAL_ActorCommands::Handle_CommitActorLabel(*ParamsObj, RequestId, SocketEpoch);
 		return;
 	}
 

@@ -12,7 +12,10 @@ use uebox_agent_core::{
 use uebox_engine_core::{
     ConnectionToken, EditorSelection, EngineKind, EngineRegistry, InteractionMode, ProjectIdentity,
 };
-use uebox_engine_unreal::{InstanceSummary, SelectedInstance, SocketKey, UnrealBridge};
+use uebox_engine_unreal::{
+    ActorLabelOutcome, ActorLabelRejection, BridgeError, InstanceSummary, PreparedActorLabel,
+    SelectedInstance, SocketKey, UnrealBridge,
+};
 
 static NEXT_PUBLIC_INSTANCE: AtomicU64 = AtomicU64::new(0);
 
@@ -403,6 +406,29 @@ impl UnrealProjectInfoBinding {
     }
     pub async fn wait_until_stale(&self) {
         self.inner.selected.wait_until_stale().await;
+    }
+    pub async fn prepare_actor_label(
+        &self,
+        label: &str,
+    ) -> Result<PreparedActorLabel, BridgeError> {
+        if !self.inner.candidate.summary.interactive || !self.is_current() {
+            return Err(BridgeError::StaleSelection);
+        }
+        self.inner
+            .selected
+            .prepare_actor_label(label, self.inner.deadline)
+            .await
+    }
+
+    /// Use only a user-approved capability prepared on this exact selection.
+    pub async fn commit_actor_label(&self, prepared: PreparedActorLabel) -> ActorLabelOutcome {
+        if !self.inner.candidate.summary.interactive || !self.is_current() {
+            return ActorLabelOutcome::NotExecuted(ActorLabelRejection::StaleSelection);
+        }
+        self.inner
+            .selected
+            .commit_actor_label(prepared, self.inner.deadline)
+            .await
     }
     pub fn tools(&self) -> Result<ToolRegistry, Error> {
         if !self.inner.current(&self.inner.target) {

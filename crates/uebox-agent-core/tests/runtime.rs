@@ -9,9 +9,15 @@ use tokio::{
     net::TcpListener,
 };
 use uebox_agent_core::{
-    AgentSession, Engine, Error, OpenAiProvider, ProviderConfig, ReadOnlyTool, RunPhase, RunTarget,
-    ToolDefinition, ToolError, ToolRegistry,
+    AgentSession, ApprovalDecision, Engine, Error, MutationPrepareFuture, MutationReceipt,
+    MutationSettlement, MutationSkipReason, MutationStatus, MutationTool, OpenAiProvider,
+    PreparedMutation, ProviderConfig, ReadOnlyTool, RunPhase, RunTarget, ToolApprovalFuture,
+    ToolApprovalRequest, ToolApprover, ToolDefinition, ToolError, ToolRegistry,
 };
+
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::time::Duration;
+use tokio::sync::{mpsc, oneshot};
 
 type FutureResult = Pin<Box<dyn Future<Output = Result<Value, ToolError>> + Send>>;
 
@@ -53,6 +59,311 @@ async fn request(stream: &mut tokio::net::TcpStream) -> Value {
 
 async fn respond(stream: &mut tokio::net::TcpStream, body: &str) {
     stream.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).as_bytes()).await.unwrap();
+}
+
+const MUTATION_CALL: &str = concat!(
+    "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"write-1\",\"type\":\"function\",\"function\":{\"name\":\"set_label\",\"arguments\":\"{\\\"label\\\":\\\"wanted\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n",
+    "data: [DONE]\n\n"
+);
+
+struct ApprovalQueue(
+    mpsc::UnboundedSender<(ToolApprovalRequest, oneshot::Sender<ApprovalDecision>)>,
+);
+impl ToolApprover for ApprovalQueue {
+    fn approve(&self, request: ToolApprovalRequest) -> ToolApprovalFuture {
+        let (send, receive) = oneshot::channel();
+        self.0.send((request, send)).unwrap();
+        Box::pin(async move { receive.await.unwrap_or(ApprovalDecision::Deny) })
+    }
+}
+
+struct FixtureMutation {
+    dispatches: Arc<AtomicUsize>,
+    edit: Mutex<Option<oneshot::Receiver<MutationReceipt>>>,
+    entered: Arc<tokio::sync::Notify>,
+}
+impl MutationTool for FixtureMutation {
+    fn prepare(&self, target: RunTarget, arguments: Value) -> MutationPrepareFuture {
+        assert_eq!(target.project(), "mutation-project");
+        assert_eq!(arguments["label"], "wanted");
+        let dispatches = self.dispatches.clone();
+        let entered = self.entered.clone();
+        let edit = self.edit.lock().unwrap().take();
+        Box::pin(async move {
+            Ok(PreparedMutation::new(
+                "Change actor label",
+                json!({"private":"approval-only"}),
+                move || {
+                    dispatches.fetch_add(1, Ordering::SeqCst);
+                    entered.notify_one();
+                    Box::pin(async move {
+                        match edit {
+                            Some(edit) => edit.await.unwrap(),
+                            None => MutationReceipt {
+                                status: MutationStatus::Applied,
+                                data: json!({"observed":"engine label"}),
+                            },
+                        }
+                    })
+                },
+            ))
+        })
+    }
+}
+
+struct MutationHarness {
+    session: AgentSession,
+    approvals: mpsc::UnboundedReceiver<(ToolApprovalRequest, oneshot::Sender<ApprovalDecision>)>,
+    settlements: mpsc::UnboundedReceiver<MutationSettlement>,
+    dispatches: Arc<AtomicUsize>,
+    entered: Arc<tokio::sync::Notify>,
+    valid: Arc<AtomicBool>,
+}
+
+fn mutation_harness(
+    listener: &TcpListener,
+    instance: &str,
+    timeout: Duration,
+    edit: Option<oneshot::Receiver<MutationReceipt>>,
+) -> MutationHarness {
+    let (approval_send, approvals) = mpsc::unbounded_channel();
+    let (settlement_send, settlements) = mpsc::unbounded_channel();
+    let dispatches = Arc::new(AtomicUsize::new(0));
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let valid = Arc::new(AtomicBool::new(true));
+    let validator_state = valid.clone();
+    let target = RunTarget::new(Engine::Unreal, "mutation-project", instance, 7).unwrap();
+    let mut registry = ToolRegistry::new(target)
+        .with_mutation_approval(
+            Arc::new(ApprovalQueue(approval_send)),
+            timeout,
+            Arc::new(move |receipt| {
+                settlement_send.send(receipt).unwrap();
+            }),
+        )
+        .unwrap();
+    registry
+        .register_mutation(
+            Engine::Unreal,
+            ToolDefinition::new(
+                "set_label",
+                "Set an actor label",
+                json!({"type":"object","properties":{"label":{"type":"string"}},
+                    "required":["label"],"additionalProperties":false}),
+            ),
+            Arc::new(FixtureMutation {
+                dispatches: dispatches.clone(),
+                edit: Mutex::new(edit),
+                entered: entered.clone(),
+            }),
+        )
+        .unwrap();
+    let provider = OpenAiProvider::new(ProviderConfig::new(
+        format!("http://{}/completions", listener.local_addr().unwrap()),
+        "fixture",
+    ))
+    .unwrap();
+    let session = AgentSession::new(
+        provider,
+        registry,
+        Arc::new(move |_| validator_state.load(Ordering::SeqCst)),
+        4,
+    )
+    .unwrap();
+    MutationHarness {
+        session,
+        approvals,
+        settlements,
+        dispatches,
+        entered,
+        valid,
+    }
+}
+
+async fn first_mutation_request(listener: &TcpListener) {
+    let (mut stream, _) = listener.accept().await.unwrap();
+    let body = request(&mut stream).await;
+    assert_eq!(body["tools"][0]["function"]["name"], "set_label");
+    assert!(!body.to_string().contains("approval-only"));
+    respond(&mut stream, MUTATION_CALL).await;
+}
+
+async fn mutation_model_receipt(listener: &TcpListener, next: &str) -> Value {
+    let (mut stream, _) = listener.accept().await.unwrap();
+    let body = request(&mut stream).await;
+    assert!(!body.to_string().contains("approval-only"));
+    let receipt = body["messages"].as_array().unwrap().last().unwrap();
+    assert_eq!(receipt["tool_call_id"], "write-1");
+    let result = serde_json::from_str(receipt["content"].as_str().unwrap()).unwrap();
+    respond(&mut stream, next).await;
+    result
+}
+
+const MUTATION_DONE: &str =
+    "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Observed result\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n";
+
+#[tokio::test]
+async fn approved_mutation_reports_engine_readback_and_duplicate_call_id_cannot_dispatch_again() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let mut harness = mutation_harness(&listener, "approved-edit", Duration::from_secs(2), None);
+    let model = tokio::spawn(async move {
+        first_mutation_request(&listener).await;
+        let applied = mutation_model_receipt(&listener, MUTATION_CALL).await;
+        assert_eq!(applied["status"], "applied");
+        assert_eq!(applied["data"], json!({"observed":"engine label"}));
+        let duplicate = mutation_model_receipt(&listener, MUTATION_DONE).await;
+        assert_eq!(duplicate["status"], "not_executed");
+        assert_eq!(duplicate["error"], "duplicate_tool_call");
+    });
+    let run = harness.session.start("Change the label").unwrap();
+    let task = tokio::spawn(run.execute(|_| {}));
+    let (request, decision) = harness.approvals.recv().await.unwrap();
+    assert_eq!(request.invocation.run_id, 1);
+    assert_eq!(request.invocation.tool_call_id, "write-1");
+    assert_eq!(request.invocation.tool_name, "set_label");
+    assert_eq!(request.invocation.target.generation(), 7);
+    assert_eq!(request.title, "Change actor label");
+    assert_eq!(request.preview, json!({"private":"approval-only"}));
+    assert_eq!(harness.dispatches.load(Ordering::SeqCst), 0);
+    decision.send(ApprovalDecision::Approve).unwrap();
+    let settlement = harness.settlements.recv().await.unwrap();
+    assert_eq!(settlement.invocation, request.invocation);
+    assert_eq!(settlement.receipt.status, MutationStatus::Applied);
+    assert_eq!(settlement.receipt.data, json!({"observed":"engine label"}));
+    assert!(settlement.reason.is_none());
+    assert_eq!(task.await.unwrap().unwrap().text, "Observed result");
+    model.await.unwrap();
+    assert_eq!(harness.dispatches.load(Ordering::SeqCst), 1);
+    assert!(harness.approvals.try_recv().is_err());
+    assert!(harness.settlements.try_recv().is_err());
+}
+
+#[tokio::test]
+async fn rejected_or_expired_approval_gives_the_model_a_not_executed_receipt() {
+    for (mode, reason, code) in [
+        ("deny", MutationSkipReason::Denied, "approval_denied"),
+        ("expire", MutationSkipReason::Expired, "approval_expired"),
+    ] {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let mut harness = mutation_harness(&listener, mode, Duration::from_millis(150), None);
+        let model = tokio::spawn(async move {
+            first_mutation_request(&listener).await;
+            let skipped = mutation_model_receipt(&listener, MUTATION_DONE).await;
+            assert_eq!(skipped["status"], "not_executed");
+            assert_eq!(skipped["error"], code);
+        });
+        let task = tokio::spawn(harness.session.start("Change").unwrap().execute(|_| {}));
+        let (request, decision) = harness.approvals.recv().await.unwrap();
+        let late_decision = if mode == "deny" {
+            decision.send(ApprovalDecision::Deny).unwrap();
+            None
+        } else {
+            Some(decision)
+        };
+        let settlement = harness.settlements.recv().await.unwrap();
+        assert_eq!(settlement.invocation, request.invocation);
+        assert_eq!(settlement.receipt.status, MutationStatus::NotExecuted);
+        assert_eq!(settlement.reason, Some(reason));
+        if let Some(decision) = late_decision {
+            assert!(decision.send(ApprovalDecision::Approve).is_err());
+        }
+        assert!(task.await.unwrap().is_ok());
+        model.await.unwrap();
+        assert_eq!(harness.dispatches.load(Ordering::SeqCst), 0);
+    }
+}
+
+#[tokio::test]
+async fn cancellation_and_generation_loss_invalidate_pending_approval() {
+    for (mode, reason, error) in [
+        ("cancel", MutationSkipReason::Cancelled, Error::Cancelled),
+        (
+            "stale",
+            MutationSkipReason::TargetChanged,
+            Error::TargetChanged,
+        ),
+    ] {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let mut harness = mutation_harness(&listener, mode, Duration::from_secs(2), None);
+        let model = tokio::spawn(async move {
+            first_mutation_request(&listener).await;
+            assert!(
+                tokio::time::timeout(Duration::from_millis(175), listener.accept())
+                    .await
+                    .is_err()
+            );
+        });
+        let run = harness.session.start("Change").unwrap();
+        let cancel = run.cancellation();
+        let task = tokio::spawn(run.execute(|_| {}));
+        let (_, decision) = harness.approvals.recv().await.unwrap();
+        if mode == "cancel" {
+            cancel.cancel();
+        } else {
+            harness.valid.store(false, Ordering::SeqCst);
+        }
+        assert_eq!(task.await.unwrap().unwrap_err(), error);
+        let settlement = harness.settlements.recv().await.unwrap();
+        assert_eq!(settlement.receipt.status, MutationStatus::NotExecuted);
+        assert_eq!(settlement.reason, Some(reason));
+        assert!(decision.send(ApprovalDecision::Approve).is_err());
+        assert_eq!(harness.dispatches.load(Ordering::SeqCst), 0);
+        assert!(harness.session.snapshot().run_id.is_none());
+        model.await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn cancellation_after_dispatch_keeps_the_final_engine_receipt_and_drains() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let (finish, edit) = oneshot::channel();
+    let mut harness = mutation_harness(
+        &listener,
+        "draining-edit",
+        Duration::from_secs(2),
+        Some(edit),
+    );
+    let model = tokio::spawn(async move {
+        first_mutation_request(&listener).await;
+        assert!(
+            tokio::time::timeout(Duration::from_millis(175), listener.accept())
+                .await
+                .is_err()
+        );
+    });
+    let run = harness.session.start("Change").unwrap();
+    let cancel = run.cancellation();
+    let task = tokio::spawn(run.execute(|_| {}));
+    let (request, decision) = harness.approvals.recv().await.unwrap();
+    decision.send(ApprovalDecision::Approve).unwrap();
+    harness.entered.notified().await;
+    cancel.cancel();
+    assert_eq!(task.await.unwrap().unwrap_err(), Error::Cancelled);
+    assert_eq!(harness.session.snapshot().phase, Some(RunPhase::Draining));
+    assert!(matches!(harness.session.start("another"), Err(Error::Busy)));
+    assert!(harness.settlements.try_recv().is_err());
+    finish
+        .send(MutationReceipt {
+            status: MutationStatus::Mismatch,
+            data: json!({"observed":"different engine state"}),
+        })
+        .unwrap();
+    let settled = harness.settlements.recv().await.unwrap();
+    assert_eq!(settled.invocation, request.invocation);
+    assert_eq!(settled.receipt.status, MutationStatus::Mismatch);
+    assert_eq!(
+        settled.receipt.data,
+        json!({"observed":"different engine state"})
+    );
+    assert_eq!(harness.dispatches.load(Ordering::SeqCst), 1);
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while harness.session.snapshot().run_id.is_some() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    model.await.unwrap();
 }
 
 #[tokio::test]

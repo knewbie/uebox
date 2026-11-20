@@ -19,6 +19,14 @@ impl LockedStorage {
     }
 }
 
+impl Drop for LockedStorage {
+    fn drop(&mut self) {
+        // A child forked by another thread may briefly retain the descriptor
+        // before exec. Unlock when the operation ends even in that interval.
+        let _ = self._lock.unlock();
+    }
+}
+
 /// Use only the trusted app profile resolved by the Rust host. The lock
 /// coordinates cooperating hosts; path checks cannot prevent replacement by
 /// unrelated software with write access to the profile or its ancestors.

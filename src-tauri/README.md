@@ -125,6 +125,25 @@ UEBOX_TEST_UNITY_PROJECT=/absolute/temporary/project UEBOX_TEST_UNITY_PORT=54830
   -- --ignored --exact
 ```
 
+### Unreal Actor label approval / UE Actor 标签审批
+
+Before creating an Unreal assistant, enable Actor label changes for that
+session. The assistant can then request a change to the single Actor selected
+in the editor. The preview shows the Actor path and both labels. Approve or
+decline each request in the window that started it. The editor rechecks the
+connection, project, Actor, and original label, applies the change in an editor
+transaction, and reads back the value. Save the project in Unreal when ready.
+After an uncertain outcome, further label writes to the same project are
+blocked for the life of the host. Inspect the result in the editor before
+starting a new host session. Receipts are kept in memory. A real Unreal
+build and editor validation are pending.
+
+创建 UE 助手前，可为该会话开启 Actor 标签修改。助手可请求修改编辑器中唯一选中的
+Actor。预览显示对象路径和新旧标签，在发起窗口逐次批准或拒绝。编辑器重新核验连接、
+项目、对象和原标签，执行事务并读回标签。需要保存时请在 Unreal 中操作。结果未知时，
+当前宿主会阻止该工程后续标签修改。请先在编辑器确认结果，再开启新的宿主会话。
+回执保存在内存中。真实 UE 的插件构建与编辑器验证仍待完成。
+
 ### Project registrations / 项目登记
 
 Choose an engine and enter a name and absolute project directory in the preview.

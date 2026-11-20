@@ -11,11 +11,14 @@ use std::{
     fmt, io,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Mutex,
     },
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
+
+mod actor_label;
+pub use actor_label::{ActorLabelOutcome, ActorLabelRejection, PreparedActorLabel};
 
 use futures_util::{SinkExt, StreamExt};
 use serde::Serialize;
@@ -65,6 +68,7 @@ pub enum BridgeError {
     StaleSelection,
     Draining,
     Timeout,
+    InvalidActorLabel,
     Remote {
         code: Option<i64>,
         message: String,
@@ -81,6 +85,7 @@ impl fmt::Display for BridgeError {
             Self::StaleSelection => write!(f, "the selected project changed; select it again"),
             Self::Draining => write!(f, "a read from the previous project is still draining"),
             Self::Timeout => write!(f, "request timed out; its outcome is unknown"),
+            Self::InvalidActorLabel => write!(f, "invalid actor label"),
             Self::Remote { code, message, .. } => {
                 write!(f, "UnrealAgentLink error")?;
                 if let Some(code) = code {
@@ -101,7 +106,24 @@ struct PendingRequest {
     reply: Reply,
     generation: u64,
     drain_on_rotation: bool,
-    dispatched: bool,
+    dispatched: Arc<AtomicBool>,
+    requires_interactive: bool,
+}
+
+enum RpcMethod {
+    ProjectInfo,
+    PrepareActorLabel,
+    CommitActorLabel,
+}
+
+impl RpcMethod {
+    fn wire_name(&self) -> &'static str {
+        match self {
+            Self::ProjectInfo => "project.info",
+            Self::PrepareActorLabel => "actor.prepare_label",
+            Self::CommitActorLabel => "actor.set_property",
+        }
+    }
 }
 
 struct ConnectionState {
@@ -322,7 +344,14 @@ impl SelectedInstance {
     /// Query exactly the selected connection with the plugin's project.info
     /// method. Timeouts and disconnects are not retried automatically.
     pub async fn get_project_info(&self, deadline: Duration) -> Result<Value, BridgeError> {
-        self.query_project_info(deadline, false).await
+        self.request(
+            RpcMethod::ProjectInfo,
+            json!({}),
+            deadline,
+            false,
+            Arc::default(),
+        )
+        .await
     }
 
     /// Keep a dispatched read draining after a project change on the same
@@ -331,13 +360,23 @@ impl SelectedInstance {
         &self,
         deadline: Duration,
     ) -> Result<Value, BridgeError> {
-        self.query_project_info(deadline, true).await
+        self.request(
+            RpcMethod::ProjectInfo,
+            json!({}),
+            deadline,
+            true,
+            Arc::default(),
+        )
+        .await
     }
 
-    async fn query_project_info(
+    async fn request(
         &self,
+        method: RpcMethod,
+        params: Value,
         deadline: Duration,
         drain_on_rotation: bool,
+        dispatched: Arc<AtomicBool>,
     ) -> Result<Value, BridgeError> {
         let id = format!(
             "req-{}",
@@ -349,10 +388,16 @@ impl SelectedInstance {
             if !state.alive {
                 return Err(BridgeError::Disconnected);
             }
-            if state.generation != self.generation || state.project.is_none() {
+            let requires_interactive = !matches!(method, RpcMethod::ProjectInfo);
+            if state.generation != self.generation
+                || state
+                    .project
+                    .as_ref()
+                    .is_none_or(|project| requires_interactive && !project.interactive)
+            {
                 return Err(BridgeError::StaleSelection);
             }
-            // Only dispatched Agent reads can survive a generation change.
+            // Dispatched Agent operations can retain the socket while draining.
             if state
                 .pending
                 .values()
@@ -366,7 +411,8 @@ impl SelectedInstance {
                     reply,
                     generation: self.generation,
                     drain_on_rotation,
-                    dispatched: false,
+                    dispatched,
+                    requires_interactive,
                 },
             );
         }
@@ -381,8 +427,8 @@ impl SelectedInstance {
             "ver": "1.0",
             "type": "req",
             "id": id,
-            "method": "project.info",
-            "params": {},
+            "method": method.wire_name(),
+            "params": params,
             "time": unix_millis()
         })
         .to_string();
@@ -420,10 +466,21 @@ impl Drop for PendingGuard {
 
 fn mark_dispatched(connection: &Connection, id: &str) -> bool {
     let mut state = lock(&connection.state);
-    let Some(request) = state.pending.get_mut(id) else {
+    let Some(request) = state.pending.get(id) else {
         return false;
     };
-    request.dispatched = true;
+    if request.requires_interactive
+        && state
+            .project
+            .as_ref()
+            .is_none_or(|project| !project.interactive)
+    {
+        if let Some(request) = state.pending.remove(id) {
+            let _ = request.reply.send(Err(BridgeError::StaleSelection));
+        }
+        return false;
+    }
+    request.dispatched.store(true, Ordering::Release);
     true
 }
 
@@ -643,9 +700,25 @@ fn handle_message(connection: &Arc<Connection>, text: &str) -> bool {
         (Some("evt"), Some("project.closed")) => return false,
         (Some("res"), _) => {
             if let Some(id) = message["id"].as_str() {
-                let request = lock(&connection.state).pending.remove(id);
+                let mut state = lock(&connection.state);
+                let request = if state.pending.get(id).is_some_and(|request| {
+                    !request.requires_interactive || request.dispatched.load(Ordering::Acquire)
+                }) {
+                    state.pending.remove(id)
+                } else {
+                    None
+                };
+                drop(state);
                 if let Some(request) = request {
-                    let _ = request.reply.send(decode_response(&message));
+                    let result = if request.requires_interactive
+                        && (!matches!(message["code"].as_i64(), Some(200 | 400..=599))
+                            || !message["result"].is_object())
+                    {
+                        Err(BridgeError::InvalidResponse)
+                    } else {
+                        decode_response(&message)
+                    };
+                    let _ = request.reply.send(result);
                 }
             }
         }
@@ -683,7 +756,9 @@ fn update_project(connection: &Connection, payload: &Value) {
             state.selection_id = format!("ue-{}", NEXT_CONNECTION.fetch_add(1, Ordering::Relaxed));
             state
                 .pending
-                .extract_if(|_, request| !request.drain_on_rotation || !request.dispatched)
+                .extract_if(|_, request| {
+                    !request.drain_on_rotation || !request.dispatched.load(Ordering::Acquire)
+                })
                 .collect()
         } else {
             HashMap::new()
@@ -788,6 +863,128 @@ mod lifecycle_tests {
             },
             outgoing,
         )
+    }
+
+    async fn actor_label_preview(
+        selected: &SelectedInstance,
+        outgoing: &mut mpsc::Receiver<Outbound>,
+    ) -> PreparedActorLabel {
+        let prepare = tokio::spawn({
+            let selected = selected.clone();
+            async move {
+                selected
+                    .prepare_actor_label("New", Duration::from_secs(1))
+                    .await
+            }
+        });
+        let Outbound::Request { id, text } = outgoing.recv().await.unwrap() else {
+            panic!("expected preview frame");
+        };
+        assert_eq!(
+            serde_json::from_str::<Value>(&text).unwrap()["method"],
+            "actor.prepare_label"
+        );
+        let reply = json!({"type":"res", "id":id, "code":200, "result":{
+            "protocol":"actor_label_v1", "status":"prepared", "ticket":"0123456789abcdef0123456789abcdef",
+            "actor_path":"/Game/Test.Test:PersistentLevel.Actor", "old_label":"Old"
+        }}).to_string();
+        // An early response must not remove the pending guarded request.
+        assert!(handle_message(&selected.connection, &reply));
+        assert!(mark_dispatched(&selected.connection, &id));
+        assert!(handle_message(&selected.connection, &reply));
+        prepare.await.unwrap().unwrap()
+    }
+
+    #[tokio::test]
+    async fn actor_label_dispatch_classifies_lost_reply_and_queued_rotation_differently() {
+        let (selected, mut outgoing) = selection_fixture();
+        let (other, mut other_outgoing) = selection_fixture();
+        let preview = actor_label_preview(&selected, &mut outgoing).await;
+        assert_eq!(
+            other
+                .commit_actor_label(preview, Duration::from_secs(1))
+                .await,
+            ActorLabelOutcome::NotExecuted(ActorLabelRejection::WrongTarget)
+        );
+        assert!(other_outgoing.try_recv().is_err());
+
+        let preview = actor_label_preview(&selected, &mut outgoing).await;
+        let timed = tokio::spawn({
+            let selected = selected.clone();
+            async move {
+                selected
+                    .commit_actor_label(preview, Duration::from_millis(80))
+                    .await
+            }
+        });
+        let Outbound::Request { id, text } = outgoing.recv().await.unwrap() else {
+            panic!("expected commit frame");
+        };
+        assert_eq!(
+            serde_json::from_str::<Value>(&text).unwrap()["params"],
+            json!({"guarded_actor_label":{"ticket":"0123456789abcdef0123456789abcdef"}})
+        );
+        assert!(mark_dispatched(&selected.connection, &id));
+        assert_eq!(timed.await.unwrap(), ActorLabelOutcome::OutcomeUnknown);
+        assert!(outgoing.try_recv().is_err());
+
+        let preview = actor_label_preview(&selected, &mut outgoing).await;
+        let queued = tokio::spawn({
+            let selected = selected.clone();
+            async move {
+                selected
+                    .commit_actor_label(preview, Duration::from_secs(1))
+                    .await
+            }
+        });
+        let Outbound::Request { id, .. } = outgoing.recv().await.unwrap() else {
+            panic!("expected queued commit frame");
+        };
+        update_project(
+            &selected.connection,
+            &json!({"projectName":"next","projectPath":"/next"}),
+        );
+        assert!(!mark_dispatched(&selected.connection, &id));
+        assert_eq!(
+            queued.await.unwrap(),
+            ActorLabelOutcome::NotExecuted(ActorLabelRejection::StaleSelection)
+        );
+    }
+
+    #[tokio::test]
+    async fn actor_label_receipt_requires_the_same_actor_and_actual_readback() {
+        let (selected, mut outgoing) = selection_fixture();
+        for (path, outcome) in [
+            (
+                "/Game/Test.Test:PersistentLevel.Actor",
+                ActorLabelOutcome::ReadbackMismatch {
+                    actual_label: "Engine_1".into(),
+                },
+            ),
+            (
+                "/Game/Test.Test:PersistentLevel.Replacement",
+                ActorLabelOutcome::OutcomeUnknown,
+            ),
+        ] {
+            let preview = actor_label_preview(&selected, &mut outgoing).await;
+            let write = tokio::spawn({
+                let selected = selected.clone();
+                async move {
+                    selected
+                        .commit_actor_label(preview, Duration::from_secs(1))
+                        .await
+                }
+            });
+            let Outbound::Request { id, .. } = outgoing.recv().await.unwrap() else {
+                panic!("expected commit frame");
+            };
+            assert!(mark_dispatched(&selected.connection, &id));
+            assert!(handle_message(&selected.connection, &json!({"type":"res", "id":id, "code":200, "result":{
+                "protocol":"actor_label_v1", "status":"readback_mismatch", "ticket":"0123456789abcdef0123456789abcdef",
+                "actor_path":path,"actual_label":"Engine_1"
+            }}).to_string()));
+            assert_eq!(write.await.unwrap(), outcome);
+        }
     }
 
     #[tokio::test]

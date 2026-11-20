@@ -39,6 +39,8 @@ public:
 	
 	// actor.set_property - 通用属性修改 v1.0
 	static void Handle_SetProperty(const TSharedPtr<FJsonObject>& Payload, const FString RequestId);
+	static void Handle_PrepareActorLabel(const TSharedPtr<FJsonObject>& Payload, const FString& RequestId, uint64 SocketEpoch);
+	static void Handle_CommitActorLabel(const TSharedPtr<FJsonObject>& Payload, const FString& RequestId, uint64 SocketEpoch);
 
 private:
 	// ========== 内部辅助函数 ==========

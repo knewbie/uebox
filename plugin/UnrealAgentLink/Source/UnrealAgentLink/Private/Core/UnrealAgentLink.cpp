@@ -218,7 +218,7 @@ void FUnrealAgentLinkModule::RegisterMenus()
 	}
 }
 
-void FUnrealAgentLinkModule::HandleSocketMessage(const FString& Data)
+void FUnrealAgentLinkModule::HandleSocketMessage(const FString& Data, uint64 SocketEpoch)
 {
 	// UE 5.3+ 修复：使用 Ticker 而不是 AsyncTask 调度到 GameThread
 	// AsyncTask(GameThread) 虽然在 GameThread 上执行，但仍处于 TaskGraph 调度上下文中
@@ -226,11 +226,11 @@ void FUnrealAgentLinkModule::HandleSocketMessage(const FString& Data)
 	// 导致 TaskGraph 递归保护断言崩溃：++Queue(QueueIndex).RecursionGuard == 1
 	// 使用 Ticker 确保代码在正常的 Tick 上下文中执行，完全脱离 TaskGraph
 	FTSTicker::GetCoreTicker().AddTicker(
-		FTickerDelegate::CreateLambda([this, Data](float DeltaTime) -> bool
+		FTickerDelegate::CreateLambda([this, Data, SocketEpoch](float DeltaTime) -> bool
 		{
 			if (CommandHandler)
 			{
-				CommandHandler->ProcessMessage(Data);
+				CommandHandler->ProcessMessage(Data, SocketEpoch);
 			}
 			return false; // 只执行一次
 		}),

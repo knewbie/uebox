@@ -91,6 +91,7 @@ export default {
       assistant: 'Assistant',
       phase: {
         running: 'Responding…',
+        awaiting_approval: 'Waiting for your approval…',
         cancelling: 'Cancelling…',
         draining: 'Draining an in-flight read…',
         completed: 'Completed',
@@ -152,6 +153,25 @@ export default {
     unreal: {
       title: 'Unreal Engine read-only query',
       assistantRoot: 'Confirm the absolute project folder for the assistant',
+      actorApproval: {
+        assistantTitle: 'Unreal Engine assistant with Actor label approvals',
+        optIn: 'Allow the assistant to request approval to change the selected Actor label',
+        title: 'Actor label changes',
+        previous: 'Current label {label}',
+        proposed: 'Proposed label {label}',
+        approve: 'Approve this label change',
+        deny: 'Reject',
+        unavailable: 'This approval has expired or is unavailable.',
+        receipt: {
+          applied:
+            'The editor now reports the label “{label}”. Save the level in Unreal Engine when ready.',
+          mismatch:
+            'The editor reported a different label “{label}”. Check the Actor in Unreal Engine.',
+          not_executed: 'The label change was not executed.',
+          unknown:
+            'The result is unknown. Check the Actor in Unreal Engine before trying another edit.'
+        }
+      },
       intro:
         'Start the local listener manually, refresh the registered instances, and select a project to read its details. No automatic selection or retries are performed.',
       trust:

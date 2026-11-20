@@ -1,10 +1,13 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AInput from 'ant-design-vue/es/input/Input'
 import AppAlert from '@renderer/components/AppAlert.vue'
 import AppButton from '@renderer/components/AppButton.vue'
+import AppCheckbox from '@renderer/components/AppCheckbox.vue'
 import EditorAgentPanel from '../../agent/AgentPanel.vue'
+import type { AgentTarget } from '../../agent/commands'
+import ActorApprovalPanel from './ActorApprovalPanel.vue'
 import { isAbsoluteProjectPath } from '../projectPath'
 import {
   startUnrealListener,
@@ -22,6 +25,9 @@ const unrealListener = ref<UnrealListenerInfo | null>(null)
 const unrealInstances = ref<UnrealInstance[]>([])
 const unrealSelected = ref<string | null>(null)
 const agentProjectRoot = ref('')
+const actorLabelChanges = ref(false)
+const agentId = ref<string | null>(null)
+const monitorApprovals = ref(false)
 const unrealResult = ref<Record<string, unknown> | null>(null)
 const unrealError = ref<string | null>(null)
 const unrealSelectionLost = ref(false)
@@ -51,13 +57,29 @@ const interactiveSelection = computed(() =>
     (instance) => instance.connection_id === unrealSelected.value && instance.interactive
   )
 )
-const agentTarget = computed(() =>
-  unrealSelected.value &&
-  interactiveSelection.value &&
-  isAbsoluteProjectPath(agentProjectRoot.value, props.os ?? null)
-    ? { connectionId: unrealSelected.value, projectRoot: agentProjectRoot.value }
-    : null
+const agentTarget = computed<Extract<AgentTarget, { connectionId: string }> | null>(() => {
+  if (
+    !unrealSelected.value ||
+    !interactiveSelection.value ||
+    !isAbsoluteProjectPath(agentProjectRoot.value, props.os ?? null)
+  )
+    return null
+  const target = { connectionId: unrealSelected.value, projectRoot: agentProjectRoot.value }
+  return actorLabelChanges.value ? { ...target, allowActorLabelChanges: true } : target
+})
+
+watch(
+  agentProjectRoot,
+  () => {
+    actorLabelChanges.value = false
+  },
+  { flush: 'sync' }
 )
+
+function agentChanged(id: string | null): void {
+  agentId.value = id
+  if (id && actorLabelChanges.value) monitorApprovals.value = true
+}
 
 async function refreshUnreal(): Promise<void> {
   if (
@@ -285,14 +307,22 @@ async function stopUnreal(): Promise<void> {
           name="unreal-agent-project"
           autocomplete="off"
         />
+        <AppCheckbox
+          v-model:checked="actorLabelChanges"
+          :disabled="Boolean(agentId) || !agentTarget"
+        >
+          {{ t('tauriPreview.unreal.actorApproval.optIn') }}
+        </AppCheckbox>
       </div>
       <EditorAgentPanel
         v-if="agentTarget"
         engine="unreal"
         :target="agentTarget"
         :target-label="agentTarget.connectionId"
+        @agent-changed="agentChanged"
       />
     </template>
+    <ActorApprovalPanel :enabled="monitorApprovals" :agent-id="agentId" />
   </section>
 </template>
 

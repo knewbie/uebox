@@ -58,6 +58,20 @@ void FUAL_NetworkManager::SendMessage(const FString& JsonData)
 	}
 }
 
+bool FUAL_NetworkManager::IsSocketEpochCurrent(uint64 Epoch) const
+{
+	return Epoch != 0 && ActiveSocketEpoch.load() == Epoch;
+}
+
+void FUAL_NetworkManager::SendMessageForSocketEpoch(uint64 Epoch, const FString& JsonData)
+{
+	FScopeLock Lock(&SendMutex);
+	if (IsSocketEpochCurrent(Epoch) && IsConnected())
+	{
+		Socket->Send(JsonData);
+	}
+}
+
 void FUAL_NetworkManager::Connect()
 {
 	if (bIsConnecting || TargetUrl.IsEmpty())
@@ -74,34 +88,81 @@ void FUAL_NetworkManager::Connect()
 	ConnectStartedAt = FPlatformTime::Seconds();
 	UE_LOG(LogUALNetwork, Log, TEXT("Connecting to %s"), *TargetUrl);
 
-	Socket = FWebSocketsModule::Get().CreateWebSocket(TargetUrl);
-	BindSocketEvents();
-	Socket->Connect();
+	const TSharedPtr<IWebSocket> NewSocket = FWebSocketsModule::Get().CreateWebSocket(TargetUrl);
+	uint64 Epoch;
+	{
+		FScopeLock Lock(&SendMutex);
+		Epoch = ++NextSocketEpoch;
+		Socket = NewSocket;
+		ActiveSocketEpoch.store(Epoch);
+		BindSocketEvents(Epoch);
+	}
+	NewSocket->Connect();
 }
 
-void FUAL_NetworkManager::BindSocketEvents()
+void FUAL_NetworkManager::BindSocketEvents(uint64 Epoch)
 {
 	if (!Socket.IsValid())
 	{
 		return;
 	}
 
-	Socket->OnConnected().AddRaw(this, &FUAL_NetworkManager::HandleOnConnected);
-	Socket->OnConnectionError().AddRaw(this, &FUAL_NetworkManager::HandleOnConnectionError);
-	Socket->OnClosed().AddRaw(this, &FUAL_NetworkManager::HandleOnClosed);
-	Socket->OnMessage().AddRaw(this, &FUAL_NetworkManager::HandleOnMessage);
+	ConnectedHandle = Socket->OnConnected().AddLambda([this, Epoch]()
+	{
+		if (IsSocketEpochCurrent(Epoch))
+		{
+			HandleOnConnected();
+		}
+	});
+	ErrorHandle = Socket->OnConnectionError().AddLambda([this, Epoch](const FString& Error)
+	{
+		uint64 Expected = Epoch;
+		if (ActiveSocketEpoch.compare_exchange_strong(Expected, 0))
+		{
+			HandleOnConnectionError(Epoch, Error);
+		}
+	});
+	ClosedHandle = Socket->OnClosed().AddLambda([this, Epoch](int32 Code, const FString& Reason, bool bWasClean)
+	{
+		uint64 Expected = Epoch;
+		if (ActiveSocketEpoch.compare_exchange_strong(Expected, 0))
+		{
+			HandleOnClosed(Epoch, Code, Reason, bWasClean);
+		}
+	});
+	MessageHandle = Socket->OnMessage().AddLambda([this, Epoch](const FString& Data)
+	{
+		if (IsSocketEpochCurrent(Epoch))
+		{
+			MessageReceivedDelegate.Broadcast(Data, Epoch);
+		}
+	});
 }
 
-void FUAL_NetworkManager::CleanupSocket()
+void FUAL_NetworkManager::CleanupSocket(uint64 ExpectedEpoch)
 {
-	if (Socket.IsValid())
+	TSharedPtr<IWebSocket> OldSocket;
+	FDelegateHandle OldConnected, OldError, OldClosed, OldMessage;
 	{
-		Socket->OnConnected().RemoveAll(this);
-		Socket->OnConnectionError().RemoveAll(this);
-		Socket->OnClosed().RemoveAll(this);
-		Socket->OnMessage().RemoveAll(this);
-		Socket->Close();
-		Socket.Reset();
+		FScopeLock Lock(&SendMutex);
+		if (ExpectedEpoch != 0 && ExpectedEpoch != NextSocketEpoch)
+		{
+			return;
+		}
+		ActiveSocketEpoch.store(0);
+		OldSocket = MoveTemp(Socket);
+		OldConnected = ConnectedHandle;
+		OldError = ErrorHandle;
+		OldClosed = ClosedHandle;
+		OldMessage = MessageHandle;
+	}
+	if (OldSocket.IsValid())
+	{
+		OldSocket->OnConnected().Remove(OldConnected);
+		OldSocket->OnConnectionError().Remove(OldError);
+		OldSocket->OnClosed().Remove(OldClosed);
+		OldSocket->OnMessage().Remove(OldMessage);
+		OldSocket->Close();
 	}
 	bIsConnecting = false;
 }
@@ -208,11 +269,6 @@ bool FUAL_NetworkManager::TickHeartbeat(float DeltaTime)
 	return true; // 继续运行
 }
 
-void FUAL_NetworkManager::HandleOnMessage(const FString& Data)
-{
-	MessageReceivedDelegate.Broadcast(Data);
-}
-
 void FUAL_NetworkManager::HandleOnConnected()
 {
 	UE_LOG(LogUALNetwork, Display, TEXT("Connected to %s"), *TargetUrl);
@@ -221,18 +277,18 @@ void FUAL_NetworkManager::HandleOnConnected()
 	ConnectedDelegate.Broadcast();
 }
 
-void FUAL_NetworkManager::HandleOnClosed(int32 StatusCode, const FString& Reason, bool bWasClean)
+void FUAL_NetworkManager::HandleOnClosed(uint64 Epoch, int32 StatusCode, const FString& Reason, bool bWasClean)
 {
 	UE_LOG(LogUALNetwork, Warning, TEXT("Socket closed (%d): %s Clean=%d"), StatusCode, *Reason, bWasClean);
 	bIsConnecting = false;
 	BroadcastDisconnectedOnce();
 	if (bWantsReconnect)
 	{
-		CleanupSocket();
+		CleanupSocket(Epoch);
 	}
 }
 
-void FUAL_NetworkManager::HandleOnConnectionError(const FString& Error)
+void FUAL_NetworkManager::HandleOnConnectionError(uint64 Epoch, const FString& Error)
 {
 	UE_LOG(LogUALNetwork, Error, TEXT("Connection error: %s"), *Error);
 	LogProxyRemedyOnce();
@@ -240,7 +296,7 @@ void FUAL_NetworkManager::HandleOnConnectionError(const FString& Error)
 	BroadcastDisconnectedOnce();
 	if (bWantsReconnect)
 	{
-		CleanupSocket();
+		CleanupSocket(Epoch);
 	}
 }
 

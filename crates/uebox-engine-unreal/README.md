@@ -39,11 +39,37 @@ one host process, and must not be persisted across application restarts.
 Non-interactive instances remain visible with `interactive: false`; older
 plugin announcements that omit the field are treated as interactive.
 
-The only supported request is the read-only `project.info` method. The adapter
+The read-only project query uses `project.info`. The adapter
 returns the engine's result object without synthesizing project data, reports
 protocol errors, and never retries a timed-out or disconnected request. The
 caller supplies the deadline. A timeout does not prove that the remote side
 didn't receive the request.
+
+### Guarded Actor labels
+
+On an explicitly chosen interactive selection, `prepare_actor_label(label,
+deadline)` sends `actor.prepare_label` with `new_label`. A supported plugin
+returns an `actor_label_v1` preview for the single selected Actor in the current
+editor level. Keep `PreparedActorLabel` in trusted host state and show only
+its actor object path, old label, and requested label. The plugin expires the
+ticket after 120 seconds. Drop the preview on denial or cancellation before
+dispatch.
+
+After approval, call `commit_actor_label(prepared, deadline)` on the original
+selection. It consumes the preview and sends one `actor.set_property` frame
+containing only `guarded_actor_label.ticket`. The legacy setter needs fields
+absent from this frame, and older plugins cannot issue a supported preview.
+The plugin consumes the ticket before editing and rechecks socket, project,
+editor world, level, object identity, selection, and the original label. It
+rejects play/simulate and reports an actual post-transaction label. The command
+never saves the level.
+
+`ActorLabelOutcome` distinguishes an applied value, observed mismatch,
+confirmed non-execution, and an unknown outcome after possible dispatch.
+The host should retain and await the commit through settlement even if the UI
+or model run stops waiting. Never retry an unknown write, including by issuing
+a fresh preview implicitly. Approval ownership and handling of unknown results
+across reconnections belong to the host.
 
 By default the listener sends WebSocket pings every 15 seconds and disconnects
 a socket after 45 seconds without inbound WebSocket activity. Plugin

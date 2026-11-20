@@ -13,7 +13,7 @@ public:
 	FUAL_CommandHandler();
 
 	// 必须在 GameThread 调用
-	void ProcessMessage(const FString& JsonPayload);
+	void ProcessMessage(const FString& JsonPayload, uint64 SocketEpoch);
 
 	// 构建项目信息（代理到 FUAL_EditorCommands::BuildProjectInfo）
 	TSharedPtr<FJsonObject> BuildProjectInfo() const;

@@ -3,9 +3,10 @@
 #include "CoreMinimal.h"
 #include "IWebSocket.h"
 #include "Runtime/Launch/Resources/Version.h"
+#include <atomic>
 
 // 线程间消息通知
-DECLARE_MULTICAST_DELEGATE_OneParam(FUALOnMessageReceived, const FString&);
+DECLARE_MULTICAST_DELEGATE_TwoParams(FUALOnMessageReceived, const FString&, uint64);
 DECLARE_MULTICAST_DELEGATE(FUALOnConnected);
 DECLARE_MULTICAST_DELEGATE(FUALOnDisconnected);
 
@@ -30,6 +31,8 @@ public:
 
 	// 发送消息（线程安全）
 	void SendMessage(const FString& JsonData);
+	bool IsSocketEpochCurrent(uint64 Epoch) const;
+	void SendMessageForSocketEpoch(uint64 Epoch, const FString& JsonData);
 
 	// 接收消息回调（在 Socket 线程触发，外部需切到 GameThread）
 	FUALOnMessageReceived& OnMessageReceived() { return MessageReceivedDelegate; }
@@ -53,8 +56,8 @@ private:
 	FUAL_NetworkManager() = default;
 
 	void Connect();
-	void BindSocketEvents();
-	void CleanupSocket();
+	void BindSocketEvents(uint64 Epoch);
+	void CleanupSocket(uint64 ExpectedEpoch = 0);
 
 	void StartReconnectTimer();
 	void StopReconnectTimer();
@@ -64,10 +67,9 @@ private:
 	void StopHeartbeatTimer();
 	bool TickHeartbeat(float DeltaTime);
 
-	void HandleOnMessage(const FString& Data);
 	void HandleOnConnected();
-	void HandleOnClosed(int32 StatusCode, const FString& Reason, bool bWasClean);
-	void HandleOnConnectionError(const FString& Error);
+	void HandleOnClosed(uint64 Epoch, int32 StatusCode, const FString& Reason, bool bWasClean);
+	void HandleOnConnectionError(uint64 Epoch, const FString& Error);
 
 	/** 只在「连着 → 断了」这个跳变上播一次，重连失败的每一次重试不再播 */
 	void BroadcastDisconnectedOnce();
@@ -82,6 +84,9 @@ private:
 private:
 	FCriticalSection SendMutex;
 	TSharedPtr<IWebSocket> Socket;
+	uint64 NextSocketEpoch = 0;
+	std::atomic<uint64> ActiveSocketEpoch{0};
+	FDelegateHandle ConnectedHandle, ErrorHandle, ClosedHandle, MessageHandle;
 	FString TargetUrl;
 
 	FTickerHandleType ReconnectTickerHandle;

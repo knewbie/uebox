@@ -11,7 +11,11 @@ mod unity_agent;
 #[cfg(feature = "unreal")]
 mod unreal;
 #[cfg(feature = "unreal")]
+mod unreal_actor_tool;
+#[cfg(feature = "unreal")]
 mod unreal_agent;
+#[cfg(feature = "unreal")]
+mod unreal_approval;
 
 pub use host::{read_host_status, Capability, EngineModules, HostStatus};
 
@@ -23,7 +27,17 @@ pub fn configure_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> taur
     #[cfg(feature = "unity")]
     let builder = builder.manage(unity::UnityQueries::default());
     #[cfg(feature = "unreal")]
-    let builder = builder.manage(unreal::UnrealListenerState::default());
+    let builder = builder
+        .manage(unreal::UnrealListenerState::default())
+        .on_window_event(|window, event| {
+            use tauri::Manager;
+            if matches!(event, tauri::WindowEvent::Destroyed) {
+                window
+                    .state::<unreal::UnrealListenerState>()
+                    .agents
+                    .destroy_window(window.label());
+            }
+        });
     builder.invoke_handler(tauri::generate_handler![
         host::host_status,
         project_library::list_registered_projects,
@@ -85,7 +99,11 @@ pub fn configure_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> taur
         #[cfg(feature = "unreal")]
         unreal_agent::cancel_unreal_agent,
         #[cfg(feature = "unreal")]
-        unreal_agent::close_unreal_agent
+        unreal_agent::close_unreal_agent,
+        #[cfg(feature = "unreal")]
+        unreal_agent::list_unreal_actor_approvals,
+        #[cfg(feature = "unreal")]
+        unreal_agent::answer_unreal_actor_approval
     ])
 }
 

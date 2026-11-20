@@ -27,7 +27,7 @@ public:
 	
 private:
 
-	void HandleSocketMessage(const FString& Data);
+	void HandleSocketMessage(const FString& Data, uint64 SocketEpoch);
 	void HandleSocketConnected();
 	void HandleSocketDisconnected();
 	void RegisterMenus();

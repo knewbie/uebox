@@ -1,9 +1,12 @@
 import { invoke } from '@tauri-apps/api/core'
 
 export type AgentEngine = 'godot' | 'unity' | 'unreal'
-export type AgentTarget = { sessionId: string } | { connectionId: string; projectRoot: string }
+export type AgentTarget =
+  | { sessionId: string }
+  | { connectionId: string; projectRoot: string; allowActorLabelChanges?: true }
 export type AgentPhase =
   | 'running'
+  | 'awaiting_approval'
   | 'cancelling'
   | 'draining'
   | 'completed'

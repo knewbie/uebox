@@ -945,3 +945,187 @@ async fn unregistered_connection_expires_even_under_continuous_activity() {
     assert!(bridge.instances().is_empty());
     bridge.shutdown().await;
 }
+
+const ACTOR_LABEL_TICKET: &str = "0123456789abcdef0123456789abcdef";
+const ACTOR_OBJECT_PATH: &str = "/Game/Test.Test:PersistentLevel.FixtureActor";
+const ACTOR_LABEL_RPC: Duration = Duration::from_secs(2);
+
+async fn prepare_label(
+    client: &mut Client,
+    selected: &uebox_engine_unreal::SelectedInstance,
+) -> uebox_engine_unreal::PreparedActorLabel {
+    let prepare = tokio::spawn({
+        let selected = selected.clone();
+        async move {
+            selected
+                .prepare_actor_label("Requested", ACTOR_LABEL_RPC)
+                .await
+        }
+    });
+    let frame = next_request(client).await;
+    assert_eq!(frame["method"], "actor.prepare_label");
+    assert_eq!(frame["params"], json!({"new_label":"Requested"}));
+    send(
+        client,
+        json!({"type":"res","id":id(&frame),"code":200,"result":{
+            "protocol":"actor_label_v1","status":"prepared","ticket":ACTOR_LABEL_TICKET,
+            "actor_path":ACTOR_OBJECT_PATH,"old_label":"Before"
+        }}),
+    )
+    .await;
+    let preview = prepare.await.unwrap().unwrap();
+    assert_eq!(preview.actor_path(), ACTOR_OBJECT_PATH);
+    assert_eq!(preview.old_label(), "Before");
+    assert_eq!(preview.new_label(), "Requested");
+    preview
+}
+
+#[tokio::test]
+async fn actor_label_commit_uses_only_guarded_params_and_reports_actual_readback() {
+    use uebox_engine_unreal::ActorLabelOutcome;
+
+    let bridge = UnrealBridge::bind(0).await.unwrap();
+    let mut editor = connect(bridge.local_addr(), None).await;
+    announce(&mut editor, "Fixture", "/fixture/project", Some(true)).await;
+    wait_for_instances(&bridge, 1).await;
+    let selected = bridge
+        .select_instance(&bridge.instances()[0].connection_id)
+        .unwrap();
+    for (status, actual) in [
+        ("applied", "Requested"),
+        ("readback_mismatch", "Requested_1"),
+    ] {
+        let preview = prepare_label(&mut editor, &selected).await;
+        let write = tokio::spawn({
+            let selected = selected.clone();
+            async move { selected.commit_actor_label(preview, ACTOR_LABEL_RPC).await }
+        });
+        let frame = next_request(&mut editor).await;
+        assert_eq!(frame["method"], "actor.set_property");
+        assert_eq!(
+            frame["params"],
+            json!({"guarded_actor_label":{"ticket":ACTOR_LABEL_TICKET}})
+        );
+        send(
+            &mut editor,
+            json!({"type":"res","id":id(&frame),"code":200,"result":{
+                "protocol":"actor_label_v1","status":status,"ticket":ACTOR_LABEL_TICKET,
+                "actor_path":ACTOR_OBJECT_PATH,"actual_label":actual
+            }}),
+        )
+        .await;
+        let outcome = write.await.unwrap();
+        assert_eq!(
+            outcome,
+            if status == "applied" {
+                ActorLabelOutcome::Applied {
+                    actual_label: actual.into(),
+                }
+            } else {
+                ActorLabelOutcome::ReadbackMismatch {
+                    actual_label: actual.into(),
+                }
+            }
+        );
+    }
+}
+
+#[tokio::test]
+async fn actor_label_preview_cannot_move_to_another_socket_or_project_generation() {
+    use uebox_engine_unreal::{ActorLabelOutcome, ActorLabelRejection};
+
+    let bridge = UnrealBridge::bind(0).await.unwrap();
+    let mut first = connect(bridge.local_addr(), None).await;
+    let mut second = connect(bridge.local_addr(), None).await;
+    announce(&mut first, "First", "/fixture/first", Some(true)).await;
+    announce(&mut second, "Second", "/fixture/second", Some(true)).await;
+    wait_for_instances(&bridge, 2).await;
+    let select = |name: &str| {
+        let item = bridge
+            .instances()
+            .into_iter()
+            .find(|item| item.project_name == name)
+            .unwrap();
+        bridge.select_instance(&item.connection_id).unwrap()
+    };
+    let a = select("First");
+    let b = select("Second");
+    let preview = prepare_label(&mut first, &a).await;
+    assert_eq!(
+        b.commit_actor_label(preview, ACTOR_LABEL_RPC).await,
+        ActorLabelOutcome::NotExecuted(ActorLabelRejection::WrongTarget)
+    );
+    assert!(
+        tokio::time::timeout(Duration::from_millis(60), next_request(&mut second))
+            .await
+            .is_err()
+    );
+
+    let preview = prepare_label(&mut first, &a).await;
+    announce(&mut first, "Rotated", "/fixture/rotated", Some(true)).await;
+    tokio::time::timeout(ACTOR_LABEL_RPC, a.wait_until_stale())
+        .await
+        .unwrap();
+    assert_eq!(
+        a.commit_actor_label(preview, ACTOR_LABEL_RPC).await,
+        ActorLabelOutcome::NotExecuted(ActorLabelRejection::StaleSelection)
+    );
+    assert!(
+        tokio::time::timeout(Duration::from_millis(60), next_request(&mut first))
+            .await
+            .is_err()
+    );
+
+    let preview = prepare_label(&mut first, &select("Rotated")).await;
+    announce(&mut first, "First", "/fixture/first", Some(true)).await;
+    let fresh = tokio::time::timeout(ACTOR_LABEL_RPC, async {
+        loop {
+            if bridge
+                .instances()
+                .iter()
+                .any(|item| item.project_name == "First")
+            {
+                break select("First");
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        fresh.commit_actor_label(preview, ACTOR_LABEL_RPC).await,
+        ActorLabelOutcome::NotExecuted(ActorLabelRejection::WrongTarget)
+    );
+    assert!(
+        tokio::time::timeout(Duration::from_millis(60), next_request(&mut first))
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn lost_actor_label_reply_is_unknown_and_the_bridge_never_retries() {
+    use uebox_engine_unreal::ActorLabelOutcome;
+
+    let bridge = UnrealBridge::bind(0).await.unwrap();
+    let mut editor = connect(bridge.local_addr(), None).await;
+    announce(&mut editor, "Fixture", "/fixture/project", Some(true)).await;
+    wait_for_instances(&bridge, 1).await;
+    let selected = bridge
+        .select_instance(&bridge.instances()[0].connection_id)
+        .unwrap();
+    let preview = prepare_label(&mut editor, &selected).await;
+    let write = tokio::spawn(async move {
+        selected
+            .commit_actor_label(preview, Duration::from_millis(180))
+            .await
+    });
+    let frame = next_request(&mut editor).await;
+    assert_eq!(frame["method"], "actor.set_property");
+    assert_eq!(write.await.unwrap(), ActorLabelOutcome::OutcomeUnknown);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), next_request(&mut editor))
+            .await
+            .is_err()
+    );
+}

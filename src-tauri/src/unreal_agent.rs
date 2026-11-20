@@ -1,5 +1,7 @@
-//! Fixed-target, read-only Unreal Agent sessions on the existing listener.
+//! Fixed-target Unreal Agent sessions on the existing listener.
 use crate::unreal::UnrealListenerState;
+use crate::unreal_actor_tool::add_actor_tool;
+use crate::unreal_approval::{ApprovalBook, Proposal, Receipt};
 use serde::Serialize;
 use std::{
     collections::HashMap,
@@ -7,7 +9,7 @@ use std::{
     sync::{Arc, Mutex, MutexGuard},
     time::Duration,
 };
-use tauri::{Runtime, WebviewWindow};
+use tauri::{Manager, Runtime, WebviewWindow};
 use uebox_agent_core::{
     AgentSession, Cancellation, Error, ModelEvent, OpenAiProvider, ProviderConfig,
 };
@@ -22,6 +24,29 @@ const QUERY_DEADLINE: Duration = Duration::from_secs(10);
 pub(crate) struct UnrealAgentHost {
     registry: Arc<Mutex<EngineRegistry>>,
     agents: Mutex<HashMap<String, Agent>>,
+    approvals: Arc<ApprovalBook>,
+}
+
+impl UnrealAgentHost {
+    pub(crate) fn destroy_window(&self, owner: &str) {
+        let mut agents = lock(&self.agents);
+        agents.retain(|_, agent| {
+            if agent.owner == owner {
+                agent.closed = true;
+                agent.retire();
+                agent.retain()
+            } else {
+                true
+            }
+        });
+        self.approvals.revoke_owner(owner);
+    }
+}
+
+struct ModelAccess {
+    provider: OpenAiProvider,
+    credential: Arc<Mutex<Option<String>>>,
+    allow_actor_label_changes: bool,
 }
 
 struct Agent {
@@ -128,8 +153,7 @@ impl UnrealAgentHost {
         bridge: Arc<UnrealBridge>,
         connection_id: &str,
         project: ProjectIdentity,
-        provider: OpenAiProvider,
-        credential: Arc<Mutex<Option<String>>>,
+        access: ModelAccess,
     ) -> Result<CreatedAgent, String> {
         let selected = bridge
             .select_instance(connection_id)
@@ -170,6 +194,10 @@ impl UnrealAgentHost {
         } else {
             InteractionMode::NonInteractive
         };
+        if access.allow_actor_label_changes && !summary.interactive {
+            return Err("target_unavailable".into());
+        }
+        let project_root = project.root().to_owned();
         let candidate =
             UnrealCandidate::capture(bridge, Arc::clone(&self.registry), project, &summary, mode)
                 .map_err(|_| "target_unavailable")?;
@@ -178,18 +206,33 @@ impl UnrealAgentHost {
             let binding =
                 UnrealProjectInfoBinding::bind_exact(&candidate, candidate.token(), QUERY_DEADLINE)
                     .map_err(|_| "target_unavailable")?;
-            let session = AgentSession::new_with_system_prompt(
-                provider,
-                binding.tools().map_err(error_code)?,
-                binding.target_validator(),
-                6,
-                "You are a read-only assistant for the selected Unreal editor. Use only the supplied read-only tool. Do not claim to change the project.",
-            )
-            .map_err(error_code)?;
             let mut agent_id = id()?;
             while agents.contains_key(&agent_id) {
                 agent_id = id()?;
             }
+            let mut tools = binding.tools().map_err(error_code)?;
+            let prompt = if access.allow_actor_label_changes {
+                tools = add_actor_tool(
+                    tools,
+                    binding.clone(),
+                    self.approvals.clone(),
+                    project_root,
+                    owner.clone(),
+                    agent_id.clone(),
+                )
+                .map_err(error_code)?;
+                "You may request approval to change the selected Actor label. Treat denied, expired, unknown, or mismatched receipts accurately. Never claim a level was saved. Do not retry an unknown write."
+            } else {
+                "You are a read-only assistant for the selected Unreal editor. Use only the supplied read-only tool. Do not claim to change the project."
+            };
+            let session = AgentSession::new_with_system_prompt(
+                access.provider,
+                tools,
+                binding.target_validator(),
+                6,
+                prompt,
+            )
+            .map_err(error_code)?;
             Ok::<_, &'static str>((binding, session, agent_id))
         })();
         let (binding, session, agent_id) = match initialized {
@@ -219,7 +262,7 @@ impl UnrealAgentHost {
                     candidate,
                     binding,
                     session,
-                    credential,
+                    credential: access.credential,
                     monitor,
                 }),
                 run: None,
@@ -303,8 +346,9 @@ pub(crate) async fn create_unreal_agent<R: Runtime>(
     endpoint: String,
     model: String,
     credential: Option<String>,
-    state: tauri::State<'_, UnrealListenerState>,
+    allow_actor_label_changes: Option<bool>,
 ) -> Result<CreatedAgent, String> {
+    let state = window.state::<UnrealListenerState>();
     let root = PathBuf::from(project_root);
     if !root.is_absolute() {
         return Err("target_unavailable".into());
@@ -346,8 +390,11 @@ pub(crate) async fn create_unreal_agent<R: Runtime>(
         Arc::clone(listener.as_ref().ok_or("target_unavailable")?),
         &connection_id,
         project,
-        provider,
-        credential,
+        ModelAccess {
+            provider,
+            credential,
+            allow_actor_label_changes: allow_actor_label_changes == Some(true),
+        },
     )
 }
 
@@ -466,6 +513,15 @@ pub(crate) fn poll_unreal_agent<R: Runtime>(
         Some(Ok(())) => "completed",
         Some(Err(_)) => "failed",
         None if run.cancelled => "cancelling",
+        None if state
+            .agents
+            .approvals
+            .approvals(window.label(), &agent_id)
+            .iter()
+            .any(|proposal| proposal.run_id == run_id) =>
+        {
+            "awaiting_approval"
+        }
         None => "running",
     };
     let error = if agent.retired {
@@ -492,6 +548,38 @@ pub(crate) fn poll_unreal_agent<R: Runtime>(
         fragments,
         error,
     })
+}
+
+#[derive(Serialize)]
+pub(crate) struct ActorApprovalSnapshot {
+    approvals: Vec<Proposal>,
+    receipts: Vec<Receipt>,
+}
+
+#[tauri::command]
+pub(crate) fn list_unreal_actor_approvals<R: Runtime>(
+    window: WebviewWindow<R>,
+    agent_id: Option<String>,
+    state: tauri::State<'_, UnrealListenerState>,
+) -> ActorApprovalSnapshot {
+    let book = &state.agents.approvals;
+    ActorApprovalSnapshot {
+        approvals: agent_id.map_or_else(Vec::new, |id| book.approvals(window.label(), &id)),
+        receipts: book.receipts(window.label()),
+    }
+}
+
+#[tauri::command]
+pub(crate) fn answer_unreal_actor_approval<R: Runtime>(
+    window: WebviewWindow<R>,
+    approval_id: String,
+    allowed: bool,
+    state: tauri::State<'_, UnrealListenerState>,
+) -> Result<(), &'static str> {
+    state
+        .agents
+        .approvals
+        .answer(window.label(), &approval_id, allowed)
 }
 
 #[tauri::command]

@@ -3,7 +3,7 @@
 An in-process Rust library for a first, text-only OpenAI Chat Completions
 agent loop. It does not start a sidecar, discover an editor, or register any
 tools by itself. The host supplies the endpoint, model, target, target
-validator and trusted read-only tool implementations.
+validator and trusted tool implementations.
 
 ## Host integration
 
@@ -16,8 +16,8 @@ validator and trusted read-only tool implementations.
    include upstream bodies, URLs or credentials.
 2. Construct a `RunTarget` with engine, host-normalized project identity,
    instance ID and connection generation. These fields are fixed for the
-   session. Build a `ToolRegistry` for that target and explicitly register only
-   same-engine `ReadOnlyTool` implementations. Each tool returns a `ToolFuture`
+   session. Build a `ToolRegistry` for that target and explicitly register
+   same-engine tools. Each `ReadOnlyTool` returns a `ToolFuture`
    and must dispatch only to the supplied target, checking the adapter's actual
    connection generation at dispatch. `execute` and the target validator must
    return promptly; the returned future must remain pending until the underlying
@@ -68,6 +68,39 @@ For example, the current UE tool bridge creates a new public alias for each
 captured connection, so its aliases are not a stable cross-reconnect identity;
 the host must provide quarantine or a separately managed stable identity.
 
+## Approved mutations
+
+Register changes through `ToolRegistry::register_mutation`. Before constructing
+the session, configure `with_mutation_approval(approver, timeout, on_settled)`.
+A session containing mutation tools requires this policy and a timer-enabled
+Tokio runtime.
+
+- `MutationTool::prepare` can read from the fixed target and returns a
+  `PreparedMutation` with a title, private preview and single-use execution
+  closure. The adapter must leave editor state untouched during preparation.
+- The instance gate is released before the approval request. The broker
+  receives the process-unique `approval_id`, the run and tool-call IDs, the
+  fixed target and the deadline. Dropping the approval future withdraws the
+  request. Approval expires if the gate cannot be reacquired in time.
+- The worker revalidates the target and cancellation immediately before
+  dispatch. The adapter must also check the actual transport generation and
+  the write preconditions at dispatch. Repeated mutation call IDs in the same
+  run cannot execute again.
+- The adapter reports `Applied`, `Mismatch`, `NotExecuted` or `Unknown`
+  using model-safe readback data. Only `Applied` produces a successful tool
+  receipt. The preview is delivered solely to the broker. Streaming still
+  emits `ModelEvent::TextDelta` alone.
+
+The nonblocking settlement hook receives one receipt per accepted mutation
+attempt independently of the model transcript. A denied, expired, cancelled
+or invalidated edit that never reached dispatch settles as `NotExecuted`.
+Once dispatched, cancellation or dropping the run lets the worker finish and
+deliver its actual receipt. The session drains until the worker finishes.
+If that worker is interrupted after dispatch and cannot report a receipt, the
+hook receives `Unknown`. Hosts that need durable receipts must keep the runtime
+alive for draining, save settlements independently of model events, and
+quarantine any transport whose physical operation survived a runtime shutdown.
+
 ## Cancellation ordering
 
 Cancellation, event delivery, tool dispatch, transcript batch commit, and
@@ -95,13 +128,13 @@ Tool parameter schemas must be self-contained Draft 7 object schemas with
 formats, `$ref`, `$id`, content encodings and external schema retrieval are
 rejected rather than ignored. Validation does not transform arguments or apply
 defaults. The host is responsible for choosing an appropriately strict schema
-and for ensuring injected implementations are genuinely read-only. A Rust trait
-cannot prove that trusted host code is read-only, nor prevent an implementation
-from ignoring its target; the crate contains no shell, code execution, write tool
-or generic engine-method dispatcher.
+and for keeping the injected implementation within its declared read or
+approved-mutation contract. A Rust trait cannot prove the behavior of trusted
+host code. The crate contains no concrete editor write implementation, shell,
+code execution or generic engine-method dispatcher.
 
 This slice does not provide Tauri bindings, real UE/Unity/Godot tools,
-persistent history, session restoration, steering, approvals, write locks,
+persistent history, session restoration, steering, editor-specific write locks,
 multimodal input, token accounting, context compaction, automatic retries,
 provider protocols other than Chat Completions, or complete pi compatibility.
 The host must reject unsupported structured capabilities rather than discard

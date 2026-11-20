@@ -21,6 +21,7 @@ const props = defineProps<{
   target: AgentTarget | null
   targetLabel: string
 }>()
+const emit = defineEmits<{ agentChanged: [id: string | null] }>()
 const controlId = useId()
 const engineName = { godot: 'Godot', unity: 'Unity', unreal: 'Unreal Engine' }[props.engine]
 const { t } = useI18n()
@@ -40,7 +41,15 @@ let epoch = 0
 let timer: ReturnType<typeof setTimeout> | undefined
 
 const active = computed(
-  () => phase.value === 'running' || phase.value === 'cancelling' || phase.value === 'draining'
+  () =>
+    phase.value === 'running' ||
+    phase.value === 'awaiting_approval' ||
+    phase.value === 'cancelling' ||
+    phase.value === 'draining'
+)
+const allowsActorEdits = computed(
+  () =>
+    props.target && 'connectionId' in props.target && props.target.allowActorLabelChanges === true
 )
 const canCreate = computed(
   () =>
@@ -99,6 +108,7 @@ function reset(): void {
   if (previous) void closeAgent(props.engine, previous).catch(() => {})
 }
 watch(() => props.target, reset, { flush: 'sync' })
+watch(agentId, (id) => emit('agentChanged', id), { flush: 'sync' })
 onUnmounted(reset)
 
 async function configure(): Promise<void> {
@@ -206,7 +216,14 @@ async function cancel(): Promise<void> {
 <template>
   <section class="agent" :aria-labelledby="`${controlId}-heading`">
     <h3 :id="`${controlId}-heading`">
-      {{ t('tauriPreview.editorAgent.title', { engine: engineName }) }}
+      {{
+        t(
+          allowsActorEdits
+            ? 'tauriPreview.unreal.actorApproval.assistantTitle'
+            : 'tauriPreview.editorAgent.title',
+          { engine: engineName }
+        )
+      }}
     </h3>
     <p class="agent-hint">{{ t('tauriPreview.editorAgent.intro', { engine: engineName }) }}</p>
     <p>

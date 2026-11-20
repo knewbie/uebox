@@ -764,3 +764,123 @@ fn unreal_agent_filters_model_output_and_holds_cancelled_instance_until_read_dra
         "target_unavailable"
     );
 }
+
+#[test]
+fn unreal_actor_label_requires_the_owning_window_and_reports_editor_readback() {
+    use tauri::Manager;
+
+    let window = window();
+    let other = tauri::WebviewWindowBuilder::new(window.app_handle(), "other", Default::default())
+        .build()
+        .unwrap();
+    let port = temporary_port();
+    invoke(&window, "start_unreal_listener", json!({"port":port})).unwrap();
+    let editor = EditorFixture::connect(port);
+    let project = tempfile::tempdir().unwrap();
+    let root = project.path().canonicalize().unwrap();
+    editor.announce("ActorFixture", root.to_str().unwrap());
+    let connection = await_instances(&window, Some("ActorFixture"))[0]["connection_id"].clone();
+    let model = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    model.set_nonblocking(true).unwrap();
+    let reply = invoke(&window, "create_unreal_agent", json!({
+        "connectionId": connection, "projectRoot": root,
+        "endpoint":format!("http://{}/completions", model.local_addr().unwrap()), "model":"fixture",
+        "allowActorLabelChanges":true
+    })).unwrap();
+    let agent_args = json!({"agentId":reply["agentId"]});
+    let actor = "/Game/Fixture.Fixture:PersistentLevel.TestActor";
+
+    for allowed in [false, true] {
+        let run = invoke(
+            &window,
+            "start_unreal_agent",
+            json!({
+                "agentId":reply["agentId"],"text":"Set the selected Actor label to Updated"
+            }),
+        )
+        .unwrap();
+        let tool_choice = json!({"choices":[{"index":0,"delta":{"tool_calls":[{
+            "index":0,"id":format!("label-{allowed}"),"type":"function",
+            "function":{"name":"ue_change_selected_actor_label","arguments":"{\"label\":\"Updated\"}"}
+        }]},"finish_reason":"tool_calls"}]});
+        let offered = model_step(&model, &format!("data: {tool_choice}\n\ndata: [DONE]\n\n"));
+        assert_eq!(offered["tools"].as_array().unwrap().len(), 2);
+        let prepare = editor.next_request();
+        assert_eq!(prepare["method"], "actor.prepare_label");
+        assert_eq!(prepare["params"], json!({"new_label":"Updated"}));
+        let ticket = if allowed {
+            "00112233445566778899aabbccddeeff"
+        } else {
+            "11223344556677889900aabbccddeeff"
+        };
+        editor.reply(
+            &prepare,
+            json!({"protocol":"actor_label_v1","status":"prepared",
+            "ticket":ticket,"actor_path":actor,"old_label":"Original"}),
+        );
+        await_unreal_agent_phase(&window, &run, "awaiting_approval");
+        let list = invoke(&window, "list_unreal_actor_approvals", agent_args.clone()).unwrap();
+        let proposal = &list["approvals"][0];
+        assert_eq!(proposal["actorPath"], actor);
+        assert_eq!(proposal["oldLabel"], "Original");
+        assert_eq!(proposal["newLabel"], "Updated");
+        assert!(!proposal.to_string().contains(ticket));
+        assert_eq!(
+            invoke(&other, "list_unreal_actor_approvals", agent_args.clone()).unwrap()["approvals"],
+            json!([])
+        );
+        let answer = json!({"approvalId":proposal["approvalId"],"allowed": allowed});
+        assert_eq!(
+            invoke(&other, "answer_unreal_actor_approval", answer.clone()),
+            Err(json!("approval_unavailable"))
+        );
+        assert!(editor.requests.try_recv().is_err());
+        invoke(&window, "answer_unreal_actor_approval", answer.clone()).unwrap();
+        assert_eq!(
+            invoke(&window, "answer_unreal_actor_approval", answer),
+            Err(json!("approval_unavailable"))
+        );
+
+        if allowed {
+            let commit = editor.next_request();
+            assert_eq!(commit["method"], "actor.set_property");
+            assert_eq!(
+                commit["params"],
+                json!({"guarded_actor_label":{"ticket":ticket}})
+            );
+            editor.reply(
+                &commit,
+                json!({"protocol":"actor_label_v1","status":"applied",
+                "ticket":ticket,"actor_path":actor,"actual_label":"Updated"}),
+            );
+        }
+        let body = model_step(&model, concat!(
+            "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"done\"},\"finish_reason\":\"stop\"}]}\n\n",
+            "data: [DONE]\n\n"
+        ));
+        let tool = body["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .rev()
+            .find(|message| message["role"] == "tool")
+            .unwrap();
+        let receipt: Value = serde_json::from_str(tool["content"].as_str().unwrap()).unwrap();
+        let status = if allowed { "applied" } else { "not_executed" };
+        assert_eq!(receipt["status"], status);
+        assert!(!body.to_string().contains(ticket));
+        assert!(!body.to_string().contains(actor));
+        if allowed {
+            assert_eq!(
+                receipt["data"],
+                json!({"actualLabel":"Updated","saved":false})
+            );
+        }
+        await_unreal_agent_phase(&window, &run, "completed");
+        let history = invoke(&window, "list_unreal_actor_approvals", json!({})).unwrap();
+        assert_eq!(history["receipts"][0]["status"], status);
+        assert!(editor.requests.try_recv().is_err());
+    }
+    invoke(&window, "close_unreal_agent", agent_args).unwrap();
+    invoke(&window, "stop_unreal_listener", json!({})).unwrap();
+}
