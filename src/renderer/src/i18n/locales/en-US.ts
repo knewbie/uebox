@@ -24,7 +24,9 @@ export default {
       agent: 'AI assistant',
       libraries: 'Project and content libraries',
       settings: 'Application settings',
-      projectRegistration: 'Project registration'
+      projectRegistration: 'Project registration',
+      chatHistory: 'Chat history',
+      legacyHistory: 'Legacy chat archive'
     },
     language: 'Language',
     appearance: 'Appearance',
@@ -117,6 +119,55 @@ export default {
         failed: 'Failed',
         cancelled: 'Cancelled',
         interrupted: 'Interrupted'
+      }
+    },
+    legacyHistory: {
+      title: 'Legacy chat archive',
+      intro: 'Import an old JSON archive and browse its saved chats as read-only text.',
+      open: 'Open archive',
+      close: 'Close archive',
+      importFile: 'Legacy JSON archive',
+      importHint: 'Choose a UTF-8 JSON file up to 16 MiB, then confirm import.',
+      confirmImport: 'Confirm import',
+      clearFile: 'Cancel selection',
+      importing: 'Importing archive…',
+      imported: '{inserted} imported; {alreadyImported} already imported; {embeddedAttachments} embedded attachments; {unavailableAttachments} unavailable attachments.',
+      errors: {
+        tooLarge: 'The archive exceeds the 16 MiB limit.',
+        invalidUtf8: 'The archive must use valid UTF-8 encoding.',
+        readFailed: 'Unable to read the selected archive. Select the file again.',
+        importFailed: 'Unable to import the archive. Check the file and try again.'
+      },
+      refresh: 'Refresh',
+      loadMore: 'Load more',
+      loadingList: 'Loading archived chats…',
+      listError: 'Unable to load the archive. Try again.',
+      emptyList: 'No imported chats.',
+      chats: 'Archived chats',
+      selectChat: 'Select an archived chat to view its messages.',
+      loadingChat: 'Loading archived chat…',
+      detailError: 'Unable to load this chat. Try again.',
+      retry: 'Retry',
+      untitled: 'Untitled chat',
+      createdAt: 'Created',
+      updatedAt: 'Updated',
+      emptyMessages: 'No messages saved in this chat.',
+      roles: { user: 'You', assistant: 'Assistant' },
+      statuses: {
+        completed: 'Completed',
+        failed: 'Failed',
+        cancelled: 'Cancelled',
+        interrupted: 'Interrupted'
+      },
+      attachments: {
+        title: 'Attachments',
+        kind: 'Attachment: {kind}',
+        unavailable: 'Attachment unavailable',
+        viewImage: 'View image',
+        loadingImage: 'Loading image…',
+        imageError: 'Unable to display this image. Try again.',
+        retryImage: 'Retry image',
+        imageAlt: 'Archived image'
       }
     },
     editorAgent: {
@@ -338,6 +389,17 @@ export default {
   },
   // Sidebar "AI Chat" list: grouped by UE project, pinning, project-less chats
   chatSidebar: {
+    historyExport: {
+      action: 'Export chat history…',
+      success: 'Exported {count} chats.',
+      errors: {
+        chat_history_export_busy: 'A history export is already in progress.',
+        chat_history_export_invalid: 'The history or selected destination is invalid.',
+        chat_history_export_unavailable: 'Chat history is unavailable.',
+        chat_history_export_exists: 'A file already exists at the selected location.',
+        chat_history_export_write_failed: 'Unable to save the history export.'
+      }
+    },
     pinned: 'Pinned',
     projects: 'Projects',
     archive: 'Archive chat',

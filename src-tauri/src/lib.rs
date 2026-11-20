@@ -4,6 +4,7 @@ mod godot;
 #[cfg(feature = "godot")]
 mod godot_agent;
 mod host;
+mod legacy_history;
 mod profile_storage;
 mod project_library;
 #[cfg(feature = "unity")]
@@ -25,7 +26,8 @@ pub use host::{read_host_status, Capability, EngineModules, HostStatus};
 pub fn configure_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
     let builder = builder
         .manage(project_library::ProjectRegistrations::default())
-        .manage(chat_history::ChatHistoryHost::default());
+        .manage(chat_history::ChatHistoryHost::default())
+        .manage(legacy_history::LegacyHistoryHost::default());
     #[cfg(feature = "godot")]
     let builder = builder.manage(godot::GodotSessions::default());
     #[cfg(feature = "unity")]
@@ -46,6 +48,10 @@ pub fn configure_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> taur
         host::host_status,
         chat_history::list_agent_chats,
         chat_history::get_agent_chat,
+        legacy_history::import_legacy_chat_history,
+        legacy_history::list_legacy_chats,
+        legacy_history::get_legacy_chat,
+        legacy_history::read_legacy_chat_attachment,
         project_library::list_registered_projects,
         project_library::register_project,
         project_library::remove_registered_project,

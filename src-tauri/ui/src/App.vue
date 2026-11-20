@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   PhBookOpen,
+  PhArchive,
   PhChatCircleDots,
   PhClockCounterClockwise,
   PhFolderSimple,
@@ -17,6 +18,7 @@ import UnrealPanel from './engines/unreal/UnrealPanel.vue'
 import GodotPanel from './engines/godot/GodotPanel.vue'
 import ProjectLibraryPanel from './projects/ProjectLibraryPanel.vue'
 import AgentHistoryPanel from './history/AgentHistoryPanel.vue'
+import LegacyHistoryPanel from './legacy-history/LegacyHistoryPanel.vue'
 import type { Locale } from './i18n'
 
 type ThemePreference = 'system' | 'light' | 'dark'
@@ -31,6 +33,9 @@ const projectRegistrationAvailable = computed(() =>
 )
 const chatHistoryAvailable = computed(() =>
   status.value?.capabilities.some(({ id, available }) => id === 'chatHistory' && available)
+)
+const legacyHistoryAvailable = computed(() =>
+  status.value?.capabilities.some(({ id, available }) => id === 'legacyHistory' && available)
 )
 function readTheme(): ThemePreference {
   try {
@@ -116,6 +121,11 @@ onUnmounted(() => colorScheme.removeEventListener('change', onColorSchemeChange)
           <li v-if="chatHistoryAvailable" class="navigation-link">
             <a href="#agent-history">
               <PhClockCounterClockwise aria-hidden="true" />{{ t('tauriPreview.history.title') }}
+            </a>
+          </li>
+          <li v-if="legacyHistoryAvailable" class="navigation-link">
+            <a href="#legacy-history">
+              <PhArchive aria-hidden="true" />{{ t('tauriPreview.legacyHistory.title') }}
             </a>
           </li>
           <li><PhBookOpen aria-hidden="true" />{{ t('menu.notebooks') }}</li>
@@ -209,6 +219,7 @@ onUnmounted(() => colorScheme.removeEventListener('change', onColorSchemeChange)
 
         <ProjectLibraryPanel v-if="projectRegistrationAvailable" />
         <AgentHistoryPanel v-if="chatHistoryAvailable" />
+        <LegacyHistoryPanel v-if="legacyHistoryAvailable" />
 
         <UnrealPanel
           v-if="!status || status.engineModules?.unreal === true"

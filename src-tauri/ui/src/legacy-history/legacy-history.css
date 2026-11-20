@@ -1,0 +1,123 @@
+.legacy-content {
+  margin-top: var(--space-4);
+}
+
+.legacy-import {
+  margin-bottom: var(--space-5);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.legacy-import input {
+  box-sizing: border-box;
+  max-width: 100%;
+}
+
+.legacy-import > p,
+.legacy-metadata,
+.legacy-dates {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-normal);
+  overflow-wrap: anywhere;
+}
+
+.legacy-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin: var(--space-4) 0;
+}
+
+.legacy-layout {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-5);
+  margin-top: var(--space-4);
+}
+
+.legacy-list {
+  flex: 1 1 calc(var(--space-12) * 4);
+  min-width: 0;
+}
+
+.legacy-conversation {
+  flex: 2 1 calc(var(--space-12) * 6);
+  min-width: 0;
+}
+
+.legacy-rows,
+.legacy-messages,
+.legacy-attachments {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.legacy-row,
+.legacy-message {
+  padding-bottom: var(--space-4);
+  margin-bottom: var(--space-4);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.legacy-chat-button {
+  height: auto;
+  padding: var(--space-3);
+  justify-content: flex-start;
+  text-align: start;
+  white-space: normal;
+}
+
+.legacy-chat-button :deep(.app-button__label) {
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.legacy-chat-button[aria-pressed='true'] {
+  background: var(--color-bg-soft);
+  outline: 1px solid var(--color-border-focus);
+}
+
+.legacy-metadata {
+  padding: 0 var(--space-3);
+}
+
+.legacy-dates > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-1);
+}
+
+.legacy-dates dd {
+  margin: 0;
+}
+
+.legacy-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: var(--line-height-relaxed);
+}
+
+.legacy-attachment {
+  margin: var(--space-3) 0;
+}
+
+.legacy-attachment img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  max-height: calc(var(--space-12) * 8);
+  object-fit: contain;
+  border-radius: var(--radius-md);
+}
+
+h3,
+h4,
+h5 {
+  margin: var(--space-3) 0;
+  font-size: var(--font-size-base);
+}

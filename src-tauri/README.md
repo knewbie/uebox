@@ -160,6 +160,21 @@ messages. When a host restarts, any unfinished turn is shown as interrupted.
 查看已保存的文本。继续操作需核验编辑器连接并建立新的助手会话。历史使用独立 SQLite 库，
 不会保存模型凭据、连接票据或原始工具消息。应用重启时，未结束的轮次会标记为已中断。
 
+### Legacy chat archive / 旧版对话归档
+
+In Electron, open the actions menu beside the Chats heading and select
+**Export chat history**. In Tauri's **Legacy chat archive**, choose the exported
+JSON and confirm the import. Imports preserve visible chat text and status.
+Supported inline images are validated and stored locally for on-demand viewing.
+The archive marks other attachments as unavailable when the original bytes
+were never persisted in the visible history. Re-importing the same saved
+snapshot leaves one archived copy. Updated snapshots are retained separately.
+
+在 Electron 的「对话」标题操作菜单中选择「导出对话历史」。在 Tauri 的「旧版对话归档」
+选择导出的 JSON 并确认导入。归档保留可见文本与消息状态。支持的内嵌图片经校验后保存在本机，
+可按需查看。原始内容未保存到可见历史的附件会标记为不可用。同一快照重复导入只保留一份，
+历史内容更新后的快照单独归档。
+
 ### Project registrations / 项目登记
 
 Choose an engine and enter a name and absolute project directory in the preview.

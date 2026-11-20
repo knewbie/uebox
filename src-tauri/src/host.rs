@@ -52,11 +52,12 @@ pub fn read_host_status() -> HostStatus {
             "settings",
             "projectRegistration",
             "chatHistory",
+            "legacyHistory",
         ]
         .into_iter()
         .map(|id| Capability {
             id,
-            available: matches!(id, "projectRegistration" | "chatHistory")
+            available: matches!(id, "projectRegistration" | "chatHistory" | "legacyHistory")
                 && cfg!(any(unix, windows)),
         })
         .collect(),

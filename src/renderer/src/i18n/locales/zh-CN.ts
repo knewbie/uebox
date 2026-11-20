@@ -23,7 +23,9 @@ export default {
       agent: 'AI 助手',
       libraries: '项目库与资料库',
       settings: '应用设置',
-      projectRegistration: '项目登记'
+      projectRegistration: '项目登记',
+      chatHistory: '对话历史',
+      legacyHistory: '旧版对话归档'
     },
     language: '语言',
     appearance: '外观',
@@ -113,6 +115,55 @@ export default {
         failed: '失败',
         cancelled: '已取消',
         interrupted: '已中断'
+      }
+    },
+    legacyHistory: {
+      title: '旧版对话归档',
+      intro: '导入旧版 JSON 归档，以只读纯文本查看已保存的对话。',
+      open: '打开归档',
+      close: '关闭归档',
+      importFile: '旧版 JSON 归档',
+      importHint: '选择不超过 16 MiB 的 UTF-8 JSON 文件，再确认导入。',
+      confirmImport: '确认导入',
+      clearFile: '取消选择',
+      importing: '正在导入归档…',
+      imported: '已导入 {inserted} 条；已存在 {alreadyImported} 条；内嵌附件 {embeddedAttachments} 个；不可用附件 {unavailableAttachments} 个。',
+      errors: {
+        tooLarge: '归档文件超过 16 MiB 上限。',
+        invalidUtf8: '归档文件必须使用有效的 UTF-8 编码。',
+        readFailed: '无法读取所选归档，请重新选择文件。',
+        importFailed: '无法导入归档，请检查文件后重试。'
+      },
+      refresh: '刷新',
+      loadMore: '加载更多',
+      loadingList: '正在加载归档对话…',
+      listError: '无法加载归档，请重试。',
+      emptyList: '暂无已导入的对话。',
+      chats: '归档对话',
+      selectChat: '选择一段归档对话以查看消息。',
+      loadingChat: '正在加载归档对话内容…',
+      detailError: '无法加载此对话，请重试。',
+      retry: '重试',
+      untitled: '未命名对话',
+      createdAt: '创建时间',
+      updatedAt: '更新时间',
+      emptyMessages: '此对话没有已保存的消息。',
+      roles: { user: '你', assistant: '助手' },
+      statuses: {
+        completed: '已完成',
+        failed: '失败',
+        cancelled: '已取消',
+        interrupted: '已中断'
+      },
+      attachments: {
+        title: '附件',
+        kind: '附件：{kind}',
+        unavailable: '附件不可用',
+        viewImage: '查看图片',
+        loadingImage: '正在加载图片…',
+        imageError: '无法显示此图片，请重试。',
+        retryImage: '重试图片',
+        imageAlt: '归档图片'
       }
     },
     editorAgent: {
@@ -326,6 +377,17 @@ export default {
   },
   // 侧边栏「AI 对话」列表：按 UE 工程分组、置顶、纯对话
   chatSidebar: {
+    historyExport: {
+      action: '导出对话历史…',
+      success: '已导出 {count} 段对话。',
+      errors: {
+        chat_history_export_busy: '对话历史正在导出。',
+        chat_history_export_invalid: '历史数据或选择的目标位置无效。',
+        chat_history_export_unavailable: '对话历史当前不可用。',
+        chat_history_export_exists: '选择的位置已有文件。',
+        chat_history_export_write_failed: '无法保存对话历史导出文件。'
+      }
+    },
     pinned: '置顶',
     projects: '项目',
     archive: '归档对话',

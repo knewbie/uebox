@@ -37,6 +37,7 @@ import type { RealtimeEchoGuard } from '../shared/realtimeEchoGuard'
  * 同名的 `.d.ts`，所以那一份在这里取不到，只能各写一次。
  */
 import type { NamingRulesSavePayload } from '../main/utils/namingRulesConfig'
+import type { ChatHistoryExportResult } from '../shared/chatHistoryTransfer'
 import type { ProjectRegistrationExportResult } from '../shared/projectRegistration'
 
 /**
@@ -3123,6 +3124,8 @@ const api = {
    * 只搬运整份 JSON 字符串，不理解内容；见 renderer/utils/chatHistoryStorage.ts。
    */
   chatHistory: {
+    exportArchive: (): Promise<ChatHistoryExportResult> =>
+      ipcRenderer.invoke('chat-history:export'),
     read: (): Promise<{ 'chat-sessions'?: string; 'follow-up-queue'?: string }> =>
       ipcRenderer.invoke('chat-history:read'),
     write: (key: string, value: string): Promise<void> =>

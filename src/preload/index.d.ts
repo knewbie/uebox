@@ -63,6 +63,7 @@ import type {
 import type { DroppedPathVerdict } from '../shared/droppedPath'
 import type { ImportFailureReport, MissingPlugin, UnavailablePlugin } from '../shared/projectImport'
 import type { ProjectCoverMode } from '../shared/projectCover'
+import type { ChatHistoryExportResult } from '../shared/chatHistoryTransfer'
 import type { ProjectRegistrationExportResult } from '../shared/projectRegistration'
 import type { SpotlightAction, SpotlightSearchResponse } from '../shared/spotlight'
 import type { NotebookContextLevel } from '../shared/notebookContext'
@@ -2877,6 +2878,7 @@ declare global {
      * AI 对话历史落盘 API（原来存 localStorage，配额只有几 MB）
      */
     chatHistory: {
+      exportArchive: () => Promise<ChatHistoryExportResult>
       read: () => Promise<{ 'chat-sessions'?: string; 'follow-up-queue'?: string }>
       write: (key: string, value: string) => Promise<void>
       sessionsIndex: () => Promise<Record<string, { typing?: string[] }>>

@@ -24,10 +24,12 @@ required-features = ["godot"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+base64 = "0.22"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri = { version = "2", features = [] }
 uebox-chat-history = { path = "../crates/uebox-chat-history" }
+uebox-legacy-history = { path = "../crates/uebox-legacy-history" }
 uebox-project-library = { path = "../crates/uebox-project-library" }
 uebox-engine-unity = { path = "../crates/uebox-engine-unity", optional = true }
 uebox-engine-unreal = { path = "../crates/uebox-engine-unreal", optional = true }

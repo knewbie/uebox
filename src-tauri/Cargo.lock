@@ -4490,6 +4490,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "uebox-legacy-history"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "libc",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "tempfile",
+]
+
+[[package]]
 name = "uebox-project-library"
 version = "0.1.0"
 dependencies = [
@@ -4502,6 +4515,7 @@ dependencies = [
 name = "uebox-tauri"
 version = "1.0.12"
 dependencies = [
+ "base64 0.22.1",
  "futures-util",
  "getrandom 0.2.17",
  "serde",
@@ -4520,6 +4534,7 @@ dependencies = [
  "uebox-engine-unity",
  "uebox-engine-unreal",
  "uebox-godot-session",
+ "uebox-legacy-history",
  "uebox-project-library",
 ]
 

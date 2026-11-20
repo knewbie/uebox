@@ -13,10 +13,13 @@
  * 跟这里没有关系。
  */
 
-import { ipcMain, app } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain } from 'electron'
 import { promises as fs } from 'fs'
 import { join } from 'path'
 import { ChatSessionFiles, serialQueue, type SessionWrite } from './chatSessionFiles'
+
+import { exportVisibleChatHistory } from './chatHistoryExport'
+import type { ChatHistoryExportResult } from '../../shared/chatHistoryTransfer'
 
 /** key 是白名单，不是渲染层随便传的 —— 路径穿越的问题从源头就不存在 */
 const KEYS = ['chat-sessions', 'follow-up-queue'] as const
@@ -57,6 +60,34 @@ export function registerChatHistoryIPC(): void {
     join(historyDir(), 'sessions'),
     join(historyDir(), 'chat-messages.json')
   )
+
+  let exporting = false
+  ipcMain.handle('chat-history:export', async (event): Promise<ChatHistoryExportResult> => {
+    if (exporting) return { success: false, code: 'chat_history_export_busy' }
+    exporting = true
+    try {
+      const options: Electron.SaveDialogOptions = {
+        defaultPath: 'uebox-conversation-history.json',
+        filters: [{ name: 'JSON', extensions: ['json'] }],
+        properties: ['dontAddToRecent']
+      }
+      const parent = BrowserWindow.fromWebContents(event.sender)
+      const selected = parent
+        ? await dialog.showSaveDialog(parent, options)
+        : await dialog.showSaveDialog(options)
+      if (selected.canceled || !selected.filePath || event.sender.isDestroyed()) {
+        return { success: false, code: 'chat_history_export_cancelled' }
+      }
+      return await exportVisibleChatHistory({
+        historyDir: historyDir(),
+        destination: selected.filePath
+      })
+    } catch {
+      return { success: false, code: 'chat_history_export_unavailable' }
+    } finally {
+      exporting = false
+    }
+  })
 
   ipcMain.handle('chat-history:read', async () => {
     const result: Partial<Record<ChatHistoryKey, string>> = {}

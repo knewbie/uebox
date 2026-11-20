@@ -374,6 +374,26 @@ function hasHeaderActions(key: string): boolean {
   return key === SECTION_PROJECTS_KEY || key === SECTION_PLAIN_KEY
 }
 
+const exportingHistory = ref(false)
+const canExportHistory = Boolean(window.api?.chatHistory?.exportArchive)
+
+async function exportConversationHistory(): Promise<void> {
+  if (exportingHistory.value || !window.api?.chatHistory?.exportArchive) return
+  exportingHistory.value = true
+  try {
+    const result = await window.api.chatHistory.exportArchive()
+    if (result.success) {
+      message.success(t('chatSidebar.historyExport.success', { count: result.count }))
+    } else if (result.code !== 'chat_history_export_cancelled') {
+      message.error(t(`chatSidebar.historyExport.errors.${result.code}`))
+    }
+  } catch {
+    message.error(t('chatSidebar.historyExport.errors.chat_history_export_unavailable'))
+  } finally {
+    exportingHistory.value = false
+  }
+}
+
 function toggleCollapsed(key: string): void {
   sidebarStore.toggleGroup(key)
 }
@@ -1012,6 +1032,17 @@ function getChatInitial(title: string): string {
                     </span>
                   </AppMenuItem>
                 </AppMenuItemGroup>
+                <template v-if="section.key === SECTION_PLAIN_KEY && canExportHistory">
+                  <AppMenuDivider />
+                  <AppMenuItem
+                    key="export-history"
+                    item-key="export-history"
+                    :disabled="exportingHistory"
+                    @click="exportConversationHistory"
+                  >
+                    {{ t('chatSidebar.historyExport.action') }}
+                  </AppMenuItem>
+                </template>
               </AppMenu>
             </template>
           </AppDropdown>
