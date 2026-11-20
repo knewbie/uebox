@@ -54,7 +54,7 @@ pub(crate) fn identity(value: &str) -> bool {
     !value.is_empty() && valid_text(value, 256)
 }
 
-fn valid_text(value: &str, limit: usize) -> bool {
+pub(crate) fn valid_text(value: &str, limit: usize) -> bool {
     value.len() <= limit && !value.chars().any(char::is_control)
 }
 
@@ -80,7 +80,7 @@ fn rooted_path(path: &str) -> bool {
     parts.next().is_some_and(valid_anchor) && parts.next().is_some_and(valid_anchor)
 }
 
-fn relative_path(path: &str) -> bool {
+pub(crate) fn relative_path(path: &str) -> bool {
     valid_text(path, MAX_LOCAL_PATH)
         && !path.contains(['\\', ':'])
         && path.split('/').all(|part| !matches!(part, "" | "." | ".."))
