@@ -213,6 +213,7 @@ it('keeps controls disabled while a window opens and displays only the subsequen
 it('fails closed on a malformed status instead of enabling controls or rendering its payload', async () => {
   vi.mocked(invoke).mockResolvedValueOnce({
     ...opened,
+    open: false,
     downloadsEnabled: true,
     address: '<script>sensitive-payload</script>'
   })
@@ -222,4 +223,20 @@ it('fails closed on a malformed status instead of enabling controls or rendering
   expect(view.text()).not.toContain('sensitive-payload')
   expect(view.get('[data-browser-back]').attributes('disabled')).toBeDefined()
   expect(view.get('[data-browser-reload]').attributes('disabled')).toBeDefined()
+})
+
+it('saves a link only after explicit submission from the active session', async () => {
+  const ipc = vi.mocked(invoke).mockResolvedValueOnce({ ...opened, downloadsEnabled: true })
+  const view = render()
+  await flushPromises()
+  await view.get('#browser-download-url').setValue('https://fixture.example/report.txt')
+  expect(ipc).toHaveBeenCalledTimes(1)
+  ipc.mockResolvedValueOnce(true)
+  await view.get('[data-browser-save-link]').trigger('submit')
+  await flushPromises()
+  expect(ipc).toHaveBeenLastCalledWith('save_browser_link', {
+    sessionId: opened.sessionId,
+    address: 'https://fixture.example/report.txt'
+  })
+  expect(view.get('[data-browser-save-link] [role="status"]').text()).toContain('File saved.')
 })

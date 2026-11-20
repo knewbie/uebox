@@ -1,5 +1,6 @@
 //! Task28 manual browser controls. Keep desktop_browser::restrict_invocation
 //! around the complete application handler; this window must never receive IPC.
+pub(crate) mod download;
 mod model;
 mod native;
 #[cfg(test)]
@@ -113,7 +114,7 @@ async fn snapshot<R: Runtime>(
         history_supported: history.supported,
         navigation_blocked: flags.navigation_blocked,
         download_blocked: flags.download_blocked,
-        downloads_enabled: false,
+        downloads_enabled: true,
     })
 }
 

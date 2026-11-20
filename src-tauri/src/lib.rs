@@ -119,6 +119,7 @@ pub fn configure_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> taur
             browser::open_browser_window,
             browser::isolated_browser_status,
             browser::control_isolated_browser,
+            browser::download::save_browser_link,
             mcp::inspect_mcp_endpoint,
             mcp::list_mcp_endpoints,
             mcp::save_mcp_endpoint,

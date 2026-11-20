@@ -48,6 +48,7 @@ uebox-agent-godot-tools = { path = "../crates/uebox-agent-godot-tools", optional
 getrandom = "0.2"
 sha2 = "0.11"
 url = "2"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
 tempfile = "3"
 tokio = { version = "1", features = ["rt", "time", "sync"], optional = true }
 tauri-plugin-opener = "2"

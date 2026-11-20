@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppAlert from '@renderer/components/AppAlert.vue'
 import AppButton from '@renderer/components/AppButton.vue'
@@ -7,6 +7,7 @@ import {
   browserStatus,
   controlBrowser,
   openBrowser,
+  saveBrowserLink,
   type BrowserAction,
   type BrowserStatus
 } from './commands'
@@ -14,6 +15,18 @@ import {
 const { t } = useI18n()
 const status = ref<BrowserStatus | null>(null)
 const address = ref('')
+const downloadAddress = ref('')
+const downloading = ref(false)
+const downloadError = ref<string | null>(null)
+const downloadSaved = ref(false)
+const downloadErrors = new Set([
+  'browser_download_failed',
+  'browser_download_busy',
+  'browser_download_size',
+  'browser_download_destination',
+  'browser_download_origin',
+  'browser_invalid_session'
+])
 const pending = ref(false)
 const statusError = ref(false)
 const actionError = ref<string | null>(null)
@@ -87,6 +100,38 @@ function control(action: BrowserAction): void {
   if (action === 'forward' && (!current.historySupported || !current.canGoForward)) return
   void run(() => controlBrowser(current.sessionId!, action))
 }
+
+async function saveLink(): Promise<void> {
+  const id = status.value?.sessionId
+  const link = downloadAddress.value.trim()
+  if (!id || !link || !status.value?.downloadsEnabled || downloading.value) return
+  downloading.value = true
+  downloadError.value = null
+  downloadSaved.value = false
+  try {
+    const saved = await saveBrowserLink(id, link)
+    if (!disposed && status.value?.sessionId === id) {
+      downloadSaved.value = saved
+      if (saved) downloadAddress.value = ''
+    }
+  } catch (cause) {
+    if (!disposed && status.value?.sessionId === id) {
+      downloadError.value =
+        typeof cause === 'string' && downloadErrors.has(cause) ? cause : 'browser_download_failed'
+    }
+  } finally {
+    if (!disposed) downloading.value = false
+  }
+}
+
+watch(
+  () => status.value?.sessionId,
+  () => {
+    downloadAddress.value = ''
+    downloadError.value = null
+    downloadSaved.value = false
+  }
+)
 
 onMounted(() => {
   void refresh()
@@ -172,6 +217,31 @@ onUnmounted(() => {
       {{ t('tauriPreview.browser.historyUnavailable') }}
     </p>
     <p class="section-description">{{ t('tauriPreview.browser.downloads') }}</p>
+    <form
+      v-if="status?.downloadsEnabled"
+      class="browser-form"
+      data-browser-save-link
+      @submit.prevent="saveLink"
+    >
+      <label for="browser-download-url">{{ t('tauriPreview.browser.downloadUrl') }}</label>
+      <input
+        id="browser-download-url"
+        v-model="downloadAddress"
+        type="url"
+        maxlength="2048"
+        :disabled="downloading"
+        required
+      />
+      <AppButton html-type="submit" :disabled="downloading || !downloadAddress.trim()">
+        {{ t(downloading ? 'tauriPreview.browser.downloading' : 'tauriPreview.browser.saveLink') }}
+      </AppButton>
+      <p v-if="downloadSaved" role="status">{{ t('tauriPreview.browser.downloadSaved') }}</p>
+      <AppAlert
+        v-if="downloadError"
+        type="error"
+        :message="t(`tauriPreview.browser.errors.${downloadError}`)"
+      />
+    </form>
   </section>
 </template>
 

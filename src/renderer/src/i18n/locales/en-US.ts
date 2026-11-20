@@ -426,6 +426,10 @@ export default {
       }
     },
     browser: {
+      downloadUrl: 'Same-origin download URL',
+      saveLink: 'Save link as file',
+      downloading: 'Saving file…',
+      downloadSaved: 'File saved.',
       title: 'Isolated browser',
       intro: 'Browse manually in a private window restricted to the original HTTPS origin.',
       controls: 'Browser navigation',
@@ -441,11 +445,16 @@ export default {
       origin: 'Allowed origin',
       address: 'Current page',
       navigationBlocked: 'A navigation outside the allowed HTTPS origin was blocked.',
-      downloads: 'Downloads are blocked in this isolated window. No files will be saved.',
+      downloads: 'Use the download field to save a same-origin file.',
       downloadBlocked: 'A download request was blocked. No file was saved.',
       historyUnavailable: 'Native back and forward controls are unavailable on this platform.',
       statusError: 'Unable to read browser status. Check again.',
       errors: {
+        browser_download_failed: 'Unable to download this link.',
+        browser_download_busy: 'A download is already in progress.',
+        browser_download_size: 'Choose a file no larger than 128 MiB.',
+        browser_download_destination: 'Choose a writable destination and a new filename.',
+        browser_download_origin: 'Use an HTTPS link from this browser’s allowed origin.',
         browser_invalid_url: 'Enter an HTTPS URL without embedded credentials.',
         browser_already_open: 'Close the current browser window before opening a new one.',
         browser_invalid_session: 'This browser window has changed. Check its status again.',

@@ -38,6 +38,7 @@ pub(super) struct Session {
     pub initial: Url,
     live: AtomicBool,
     flags: Mutex<Flags>,
+    pub download: tauri::async_runtime::Mutex<()>,
 }
 
 impl Session {
@@ -117,6 +118,7 @@ impl BrowserHost {
             id,
             initial,
             live: AtomicBool::new(true),
+            download: Default::default(),
             flags: Mutex::new(Flags {
                 opening: true,
                 ..Flags::default()

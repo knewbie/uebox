@@ -113,6 +113,10 @@ fn ipc_rejects_every_browser_command_from_untrusted_windows_without_opening_a_pa
                 "control_isolated_browser",
                 serde_json::json!({"sessionId":"1","action":"reload"}),
             ),
+            (
+                "save_browser_link",
+                serde_json::json!({"sessionId":"1","address":"https://fixture.example/doc.txt"}),
+            ),
         ] {
             let error = get_ipc_response(&window, request(cmd, args.clone())).unwrap_err();
             assert_eq!(
@@ -191,6 +195,25 @@ fn main_status_is_inert_and_invalid_urls_and_sessions_have_no_side_effects() {
         .unwrap_err(),
         "browser_invalid_session"
     );
+    let browser = app.state::<BrowserHost>();
+    let session = browser
+        .reserve(approved_url("https://fixture.example/").unwrap())
+        .unwrap();
+    assert_eq!(
+        get_ipc_response(
+            &main,
+            request(
+                "save_browser_link",
+                serde_json::json!({
+                    "sessionId": session.id.to_string(),
+                    "address":"https://other.example/doc.txt"
+                })
+            )
+        )
+        .unwrap_err(),
+        "browser_download_origin"
+    );
+    browser.clear(session.id).unwrap();
     assert!(app.get_webview_window("uebox-isolated-browser").is_none());
     for action in ["eval", "navigate", "download", "javascript:alert(1)"] {
         assert!(serde_json::from_value::<Action>(serde_json::json!(action)).is_err());

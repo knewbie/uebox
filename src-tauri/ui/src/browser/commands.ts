@@ -17,7 +17,7 @@ const statusSchema = z
     historySupported: z.boolean(),
     navigationBlocked: z.boolean(),
     downloadBlocked: z.boolean(),
-    downloadsEnabled: z.literal(false)
+    downloadsEnabled: z.boolean()
   })
   .refine(
     (value) =>
@@ -26,6 +26,7 @@ const statusSchema = z
         (value.opening || value.address !== null) &&
         value.origin !== null)
   )
+  .refine((value) => !value.downloadsEnabled || (value.open && !value.opening))
 
 export type BrowserStatus = z.infer<typeof statusSchema>
 export type BrowserAction = 'back' | 'forward' | 'reload'
@@ -46,4 +47,8 @@ export async function controlBrowser(
   return statusSchema.parse(
     await invoke<unknown>('control_isolated_browser', { sessionId, action })
   )
+}
+
+export async function saveBrowserLink(sessionId: string, address: string): Promise<boolean> {
+  return z.boolean().parse(await invoke<unknown>('save_browser_link', { sessionId, address }))
 }
