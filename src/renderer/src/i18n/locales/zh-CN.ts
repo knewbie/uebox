@@ -43,6 +43,10 @@ export default {
       name: '项目名称',
       path: '项目目录的绝对路径',
       add: '登记项目',
+      importFile: '桌面版导出的项目登记文件',
+      importAction: '导入项目登记',
+      imported:
+        '新增 {inserted} 条，已登记 {alreadyRegistered} 条，文件内重复 {duplicateInFile} 条。',
       refresh: '刷新列表',
       loading: '正在读取登记记录…',
       empty: '暂无登记的项目。',
@@ -57,6 +61,10 @@ export default {
         project_invalid: '请检查项目名称、引擎和目录的绝对路径。',
         project_missing: '找不到项目目录。',
         project_duplicate: '此目录已在该引擎下登记。',
+        project_import_invalid: '文件包含无效的项目登记数据。',
+        project_import_version: '不支持此项目登记文件格式或版本。',
+        project_import_platform: '此文件使用了不同的系统路径格式。',
+        project_import_size: '请选择不超过 1 MiB 且最多包含 4,096 条登记的文件。',
         generic: '无法完成项目登记操作。'
       }
     },
@@ -2041,6 +2049,15 @@ export default {
         create: '创建项目',
         createFromTemplate: '用模板新建项目',
         importExisting: '导入已有项目',
+        exportRegistration: '导出项目登记到 Tauri',
+        registrationExported: '已导出 {count} 条项目登记。',
+        registrationExportErrors: {
+          project_registration_export_busy: '正在导出项目登记。',
+          project_registration_export_invalid: '项目列表包含无效记录或超出迁移上限。',
+          project_registration_export_unavailable: '无法读取待导出的项目。',
+          project_registration_export_exists: '文件已存在，请另取文件名。',
+          project_registration_export_write_failed: '无法保存项目登记文件。'
+        },
         refresh: '刷新',
         open: '打开项目',
         openAction: '打开',

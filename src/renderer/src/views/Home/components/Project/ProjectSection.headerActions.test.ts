@@ -19,4 +19,10 @@ describe('ProjectSection header actions', () => {
       /id="project-import-entry"[\s\S]*?:title="t\('page\.home\.project\.importExisting'\)"[\s\S]*?<PhPlus\s*\/>/
     )
   })
+
+  it('offers an explicit registration export action with an accessible name', () => {
+    expect(source).toMatch(
+      /id="project-registration-export"[\s\S]*?:aria-label="t\('page\.home\.project\.exportRegistration'\)"[\s\S]*?@click="handleExportRegistration"/
+    )
+  })
 })

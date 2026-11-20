@@ -5,10 +5,12 @@ import AInput from 'ant-design-vue/es/input/Input'
 import AppAlert from '@renderer/components/AppAlert.vue'
 import AppButton from '@renderer/components/AppButton.vue'
 import {
+  importRegisteredProjects,
   listRegisteredProjects,
   registerProject,
   removeRegisteredProject,
   type ProjectEngine,
+  type ProjectImportSummary,
   type RegisteredProject
 } from './commands'
 
@@ -18,9 +20,13 @@ const engine = ref<ProjectEngine | ''>('')
 const name = ref('')
 const path = ref('')
 const projects = ref<RegisteredProject[]>([])
-const pending = ref<'list' | 'register' | 'remove' | null>(null)
+const pending = ref<'list' | 'register' | 'remove' | 'import' | null>(null)
 const listError = ref<string | null>(null)
 const writeError = ref<string | null>(null)
+const importInput = ref<HTMLInputElement | null>(null)
+const importFile = ref<File | null>(null)
+const importSummary = ref<ProjectImportSummary | null>(null)
+const maxImportBytes = 1_048_576
 const canRegister = computed(
   () => !pending.value && Boolean(engine.value && name.value.trim() && path.value.trim())
 )
@@ -31,8 +37,16 @@ const knownErrors = new Set([
   'project_library_recovery_required',
   'project_invalid',
   'project_missing',
-  'project_duplicate'
+  'project_duplicate',
+  'project_import_invalid',
+  'project_import_version',
+  'project_import_platform',
+  'project_import_size'
 ])
+
+function errorCode(cause: unknown): string {
+  return typeof cause === 'string' && knownErrors.has(cause) ? cause : 'generic'
+}
 
 async function perform(
   operation: NonNullable<typeof pending.value>,
@@ -46,7 +60,7 @@ async function perform(
   try {
     await action()
   } catch (cause) {
-    error.value = typeof cause === 'string' && knownErrors.has(cause) ? cause : 'generic'
+    error.value = errorCode(cause)
   } finally {
     pending.value = null
   }
@@ -75,6 +89,35 @@ function removeProject(id: string): Promise<void> {
     await removeRegisteredProject(id)
     // Both resolved results mean this registration is absent from the host.
     projects.value = projects.value.filter((project) => project.id !== id)
+  })
+}
+
+function selectImportFile(event: Event): void {
+  importFile.value = (event.currentTarget as HTMLInputElement).files?.[0] ?? null
+  if (importSummary.value) importSummary.value = null
+  if (writeError.value?.startsWith('project_import_')) writeError.value = null
+}
+
+function importProjects(): Promise<void> {
+  const file = importFile.value
+  if (!file) return Promise.resolve()
+  return perform('import', async () => {
+    if (file.size > maxImportBytes) throw 'project_import_size'
+    let manifest: string
+    try {
+      manifest = new TextDecoder('utf-8', { fatal: true }).decode(await file.arrayBuffer())
+    } catch {
+      throw 'project_import_invalid'
+    }
+    importSummary.value = await importRegisteredProjects(manifest)
+    importFile.value = null
+    if (importInput.value) importInput.value.value = ''
+    listError.value = null
+    try {
+      projects.value = await listRegisteredProjects()
+    } catch (cause) {
+      listError.value = errorCode(cause)
+    }
   })
 }
 
@@ -129,6 +172,27 @@ onMounted(refresh)
         {{ t('tauriPreview.projectLibrary.add') }}
       </AppButton>
     </form>
+    <div class="project-transfer">
+      <label for="project-import-file">{{ t('tauriPreview.projectLibrary.importFile') }}</label>
+      <input
+        id="project-import-file"
+        ref="importInput"
+        type="file"
+        accept=".json,application/json"
+        :disabled="pending !== null"
+        @change="selectImportFile"
+      />
+      <AppButton
+        data-project-import
+        :disabled="!importFile || pending !== null"
+        :loading="pending === 'import'"
+        @click="importProjects"
+        >{{ t('tauriPreview.projectLibrary.importAction') }}</AppButton
+      >
+      <p v-if="importSummary" role="status">
+        {{ t('tauriPreview.projectLibrary.imported', importSummary) }}
+      </p>
+    </div>
     <AppAlert
       v-if="writeError"
       type="error"
@@ -172,6 +236,15 @@ onMounted(refresh)
 
 <style scoped src="../panel.css"></style>
 <style scoped>
+.project-transfer {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+.project-transfer input {
+  max-width: 100%;
+}
 .project-form {
   display: grid;
   gap: var(--space-3);

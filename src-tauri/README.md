@@ -152,6 +152,18 @@ Windows 依赖应用的 LocalAppData 权限并拒绝重解析点。这些检查�
 目录为前提。不兼容的数据库和回滚日志会保留，并在界面提示。崩溃恢复尚待接入，
 Electron 数据库独立存放。
 
+In the Electron project's toolbar, **Export project registrations for Tauri**
+saves project names and directories to a versioned JSON file. In the Tauri
+project registry, select that file and click **Import registrations**. Import
+accepts at most 1 MiB and 4,096 entries and supports offline projects. It keeps
+the existing name and ID for an exact engine/path match. Different spellings
+of the same path can remain as separate records.
+
+在 Electron 项目工具栏点击 **导出项目登记到 Tauri**，将项目名称与目录保存为带版本号的
+JSON 文件。在 Tauri 项目登记中选择该文件，然后点击 **导入项目登记**。文件上限为 1 MiB
+和 4,096 条登记，支持离线工程。引擎和路径完全相同的记录保留现有名称和 ID，同一路径的
+不同写法可能作为不同记录保留。
+
 `inspect_unity({ projectRoot, port, allowClientTakeover })` requires an existing absolute project directory,
 an explicit nonzero TCP port, and `allowClientTakeover: true`. Omitted, false, or
 legacy generic confirmation is denied before a socket is opened. The address is fixed to

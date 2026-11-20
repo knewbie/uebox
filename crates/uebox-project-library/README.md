@@ -21,6 +21,19 @@ modify projects, scan for editors, or start them.
 - `list()` returns the stored records without accessing project directories.
   `remove(id)` deletes only the registration, even when its directory is now
   offline. IDs are not reused after deletion. Records persist across reopening.
+- `import_batch(&[ImportRecord])` merges an entire batch in one transaction.
+  `create_with_import(absolute_database_path, &[ImportRecord])` commits the
+  initial batch to the staged database before publishing it with the same
+  no-clobber rules as `create_new`. The caller supplies decoded records.
+
+Bulk imports validate all names and native absolute UTF-8 paths for emptiness,
+format, and NUL characters without accessing the project directories. Offline
+records are accepted. Matching is by exact engine and stored path string, so
+different spellings and aliases can coexist. An existing match keeps its name
+and ID. Within the batch the first occurrence is used, and subsequent matches
+count as `duplicate_in_file` even when the first was `already_registered`.
+Skipped records do not use IDs. The returned summary describes a committed
+batch.
 
 ## Boundaries
 

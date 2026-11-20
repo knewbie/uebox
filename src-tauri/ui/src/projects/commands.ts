@@ -12,6 +12,12 @@ export interface RegisteredProject extends ProjectDetails {
   id: string
 }
 
+export interface ProjectImportSummary {
+  inserted: number
+  alreadyRegistered: number
+  duplicateInFile: number
+}
+
 export function listRegisteredProjects(): Promise<RegisteredProject[]> {
   return invoke<RegisteredProject[]>('list_registered_projects')
 }
@@ -26,4 +32,8 @@ export function registerProject(
 
 export function removeRegisteredProject(id: string): Promise<boolean> {
   return invoke<boolean>('remove_registered_project', { id })
+}
+
+export function importRegisteredProjects(manifest: string): Promise<ProjectImportSummary> {
+  return invoke<ProjectImportSummary>('import_registered_projects', { manifest })
 }

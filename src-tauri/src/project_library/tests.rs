@@ -129,6 +129,84 @@ fn invalid_command_parameters_leave_storage_uninitialized() {
     assert!(!root.exists());
 }
 
+fn import_manifest(projects: Value) -> Value {
+    json!({
+        "format": "uebox-project-registration",
+        "version": 1,
+        "pathFamily": if cfg!(windows) { "windows" } else { "posix" },
+        "projects": projects
+    })
+}
+
+#[test]
+fn import_preserves_offline_projects_and_merges_duplicates_atomically() {
+    let fixture = tempfile::tempdir().unwrap();
+    let root = fixture.path().join("preview-data");
+    let offline = fixture.path().join("offline-project");
+    let window = window(&root);
+    let manifest = import_manifest(json!([
+        {"engine":"unreal","name":"Original","path":offline},
+        {"engine":"unreal","name":"Alias","path":offline},
+        {"engine":"godot","name":"Another engine","path":offline}
+    ]));
+    let parameters = json!({"manifest":manifest.to_string()});
+    assert_eq!(
+        invoke(&window, "import_registered_projects", parameters.clone()),
+        Ok(json!({"inserted":2,"alreadyRegistered":0,"duplicateInFile":1}))
+    );
+    let before = invoke(&window, "list_registered_projects", json!({})).unwrap();
+    assert_eq!(before[0]["name"], "Original");
+    assert_eq!(before[1]["name"], "Another engine");
+    assert_eq!(
+        invoke(&window, "import_registered_projects", parameters),
+        Ok(json!({"inserted":0,"alreadyRegistered":2,"duplicateInFile":1}))
+    );
+    assert_eq!(
+        invoke(&window, "list_registered_projects", json!({})),
+        Ok(before)
+    );
+    assert!(!offline.exists());
+}
+
+#[test]
+fn rejects_invalid_manifests_before_creating_storage() {
+    let fixture = tempfile::tempdir().unwrap();
+    let root = fixture.path().join("preview-data");
+    let window = window(&root);
+    let mut unsupported = import_manifest(json!([]));
+    unsupported["version"] = json!(2);
+    let mut wrong_path_family = import_manifest(json!([]));
+    wrong_path_family["pathFamily"] = json!(if cfg!(windows) { "posix" } else { "windows" });
+    let bad_record = import_manifest(json!([
+        {"engine":"unreal","name":"Keep","path":fixture.path()},
+        {"engine":"unreal","name":"Invalid","path":"relative"}
+    ]));
+    for (manifest, code) in [
+        (unsupported, "project_import_version"),
+        (wrong_path_family, "project_import_platform"),
+        (bad_record, "project_import_invalid"),
+    ] {
+        assert_eq!(
+            invoke(
+                &window,
+                "import_registered_projects",
+                json!({"manifest":manifest.to_string()})
+            ),
+            Err(json!(code))
+        );
+        assert!(!root.exists());
+    }
+    assert_eq!(
+        invoke(
+            &window,
+            "import_registered_projects",
+            json!({"manifest":" ".repeat(1_048_577)}),
+        ),
+        Err(json!("project_import_size"))
+    );
+    assert!(!root.exists());
+}
+
 #[test]
 fn commands_preserve_incompatible_data_and_rollback_journals() {
     let fixture = tempfile::tempdir().unwrap();

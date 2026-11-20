@@ -399,6 +399,7 @@ mod tests {
     #[test]
     fn database_lock_and_journal_require_private_single_link_files() {
         use std::os::unix::fs::PermissionsExt;
+        use std::time::{Duration, Instant};
 
         let temp = tempfile::tempdir().unwrap();
         let app = temp.path();
@@ -406,23 +407,30 @@ mod tests {
         fixture_file(storage.database());
         drop(storage);
         let directory = app.join("project-library");
+        let assert_invalid_file = || {
+            let deadline = Instant::now() + Duration::from_millis(100);
+            loop {
+                let error = lock_storage(app, false).unwrap_err();
+                // This test exercises file validation. A concurrently spawned
+                // test child can briefly inherit a lock before its exec closes it.
+                if error != "project_library_locked" || Instant::now() >= deadline {
+                    assert_eq!(error, "project_library_invalid");
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(2));
+            }
+        };
         for name in ["library.sqlite", "library.lock", "library.sqlite-journal"] {
             let path = directory.join(name);
             if name == "library.sqlite-journal" {
                 fixture_file(&path);
             }
             fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
-            assert_eq!(
-                lock_storage(app, false).unwrap_err(),
-                "project_library_invalid"
-            );
+            assert_invalid_file();
             fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
             let alias = app.join("alias");
             fs::hard_link(&path, &alias).unwrap();
-            assert_eq!(
-                lock_storage(app, false).unwrap_err(),
-                "project_library_invalid"
-            );
+            assert_invalid_file();
             fs::remove_file(alias).unwrap();
         }
     }

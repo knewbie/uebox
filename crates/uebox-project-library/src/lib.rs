@@ -3,6 +3,7 @@
 //! This does not discover or migrate the Electron database, inspect project
 //! files, or start an editor. Creation and opening are separate operations.
 
+use std::collections::HashSet;
 use std::error::Error;
 use std::ffi::OsString;
 use std::fmt;
@@ -12,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use rusqlite::config::DbConfig;
-use rusqlite::{params, Connection, ErrorCode, OpenFlags, TransactionBehavior};
+use rusqlite::{params, Connection, ErrorCode, OpenFlags, Transaction, TransactionBehavior};
 
 const APPLICATION_ID: i64 = 0x5542_504c; // UBPL
 const SCHEMA_VERSION: i64 = 1;
@@ -89,6 +90,20 @@ pub struct ProjectRecord {
     pub name: String,
     /// The directory path selected at registration, not a canonicalized path.
     pub path: PathBuf,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ImportRecord {
+    pub engine: EngineKind,
+    pub name: String,
+    pub path: PathBuf,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ImportSummary {
+    pub inserted: usize,
+    pub already_registered: usize,
+    pub duplicate_in_file: usize,
 }
 
 /// A path to a standalone library. Every operation rechecks its schema.
@@ -678,10 +693,94 @@ fn resolve_directory(path: &Path) -> Result<DirectoryIdentity, LibraryError> {
     directory_identity(&canonical)
 }
 
+struct ValidatedImport<'a> {
+    engine: &'static str,
+    name: &'a str,
+    path: &'a str,
+}
+
+fn validate_import(rows: &[ImportRecord]) -> Result<Vec<ValidatedImport<'_>>, LibraryError> {
+    rows.iter()
+        .enumerate()
+        .map(|(index, row)| {
+            let path = row.path.to_str().filter(|path| !path.contains('\0'));
+            let Some(path) = path.filter(|_| row.path.is_absolute()) else {
+                return Err(failure(
+                    ErrorKind::InvalidInput,
+                    format!(
+                        "import row {} needs an absolute UTF-8 path without NUL",
+                        index + 1
+                    ),
+                ));
+            };
+            if row.name.trim().is_empty() || row.name.contains('\0') {
+                return Err(failure(
+                    ErrorKind::InvalidInput,
+                    format!("import row {} needs a nonempty name without NUL", index + 1),
+                ));
+            }
+            Ok(ValidatedImport {
+                engine: row.engine.as_db(),
+                name: &row.name,
+                path,
+            })
+        })
+        .collect()
+}
+
+fn merge_import(
+    transaction: &Transaction<'_>,
+    rows: &[ValidatedImport<'_>],
+) -> Result<ImportSummary, LibraryError> {
+    let mut summary = ImportSummary::default();
+    let mut seen = HashSet::new();
+    let mut exists = transaction
+        .prepare("SELECT 1 FROM projects WHERE engine = ?1 AND path = ?2")
+        .map_err(|error| sqlite_error("prepare import collision check", error))?;
+    let mut insert = transaction
+        .prepare("INSERT INTO projects (engine, name, path) VALUES (?1, ?2, ?3)")
+        .map_err(|error| sqlite_error("prepare project import", error))?;
+    for row in rows {
+        // Compare raw strings so Path's component normalization cannot collapse aliases.
+        if !seen.insert((row.engine, row.path)) {
+            summary.duplicate_in_file += 1;
+        } else if exists
+            .exists(params![row.engine, row.path])
+            .map_err(|error| sqlite_error("check imported project", error))?
+        {
+            summary.already_registered += 1;
+        } else {
+            insert
+                .execute(params![row.engine, row.name, row.path])
+                .map_err(|error| sqlite_error("insert imported project", error))?;
+            summary.inserted += 1;
+        }
+    }
+    Ok(summary)
+}
+
 impl ProjectLibrary {
     /// Create only a new database; an existing file or SQLite sidecar is never overwritten.
     pub fn create_new(database: impl AsRef<Path>) -> Result<Self, LibraryError> {
-        let database = database_path(database.as_ref())?;
+        Self::create_staged(database.as_ref(), |_| Ok(())).map(|(library, ())| library)
+    }
+
+    /// Publish a fresh library only after the complete import has committed.
+    pub fn create_with_import(
+        database: impl AsRef<Path>,
+        rows: &[ImportRecord],
+    ) -> Result<(Self, ImportSummary), LibraryError> {
+        let rows = validate_import(rows)?;
+        Self::create_staged(database.as_ref(), |transaction| {
+            merge_import(transaction, &rows)
+        })
+    }
+
+    fn create_staged<T>(
+        database: &Path,
+        initialize: impl FnOnce(&Transaction<'_>) -> Result<T, LibraryError>,
+    ) -> Result<(Self, T), LibraryError> {
+        let database = database_path(database)?;
         reject_existing(&database)?;
         let parent = database
             .parent()
@@ -709,25 +808,26 @@ impl ProjectLibrary {
                 .open(&staged_path)
                 .map_err(|error| io_error("create staged database", error))?,
         );
-        let connection = Connection::open_with_flags(
+        let mut connection = Connection::open_with_flags(
             &staged_path,
             OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )
         .map_err(|error| sqlite_error("open staged database", error))?;
-        connection
-            .execute_batch("BEGIN IMMEDIATE")
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|error| sqlite_error("begin database creation", error))?;
-        connection
+        transaction
             .execute(CREATE_PROJECTS, [])
             .map_err(|error| sqlite_error("create project schema", error))?;
-        connection
+        transaction
             .pragma_update(None, "application_id", APPLICATION_ID)
             .map_err(|error| sqlite_error("set application ID", error))?;
-        connection
+        transaction
             .pragma_update(None, "user_version", SCHEMA_VERSION)
             .map_err(|error| sqlite_error("set schema version", error))?;
-        connection
-            .execute_batch("COMMIT")
+        let result = initialize(&transaction)?;
+        transaction
+            .commit()
             .map_err(|error| sqlite_error("commit database creation", error))?;
         validate_header(&connection)?;
         validate_schema(&connection)?;
@@ -743,7 +843,7 @@ impl ProjectLibrary {
         reject_existing(&database)?;
         fs::hard_link(&staged_path, &database)
             .map_err(|error| io_error("publish new database", error))?;
-        Ok(Self { database, identity })
+        Ok((Self { database, identity }, result))
     }
 
     /// Open a previously created library, refusing unknown or changed schemas.
@@ -753,6 +853,34 @@ impl ProjectLibrary {
         let identity = verified.identity;
         drop(verified);
         Ok(Self { database, identity })
+    }
+
+    /// Merge only exact engine/path matches. A first occurrence colliding with the
+    /// library counts as already registered; further occurrences count as file duplicates.
+    /// All rows are validated, and no project paths are accessed on disk.
+    pub fn import_batch(&mut self, rows: &[ImportRecord]) -> Result<ImportSummary, LibraryError> {
+        let rows = validate_import(rows)?;
+        self.write_transaction("import", |transaction| merge_import(transaction, &rows))
+    }
+
+    fn write_transaction<T>(
+        &self,
+        operation: &str,
+        write: impl FnOnce(&Transaction<'_>) -> Result<T, LibraryError>,
+    ) -> Result<T, LibraryError> {
+        drop(open_readonly(&self.database, Some(self.identity))?);
+        let mut connection = open_writable(&self.database, self.identity)?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| sqlite_error(&format!("begin {operation}"), error))?;
+        validate_schema(&transaction)?;
+        verify_database_identity(&transaction, &self.database, self.identity)?;
+        let result = write(&transaction)?;
+        verify_database_identity(&transaction, &self.database, self.identity)?;
+        transaction
+            .commit()
+            .map_err(|error| sqlite_error(&format!("commit {operation}"), error))?;
+        Ok(result)
     }
 
     pub fn register(
@@ -773,15 +901,8 @@ impl ProjectLibrary {
             .ok_or_else(|| failure(ErrorKind::InvalidInput, "project path must be UTF-8"))?;
         // Validate before opening a writable connection, then validate again under
         // the write transaction so a changed schema cannot be used silently.
-        drop(open_readonly(&self.database, Some(self.identity))?);
-        let mut connection = open_writable(&self.database, self.identity)?;
-        let transaction = connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(|error| sqlite_error("begin registration", error))?;
-        validate_schema(&transaction)?;
-        verify_database_identity(&transaction, &self.database, self.identity)?;
-        let identity = resolve_directory(path)?;
-        {
+        self.write_transaction("registration", |transaction| {
+            let identity = resolve_directory(path)?;
             let mut statement = transaction
                 .prepare("SELECT path FROM projects WHERE engine = ?1")
                 .map_err(|error| sqlite_error("prepare duplicate check", error))?;
@@ -809,33 +930,29 @@ impl ProjectLibrary {
                     Err(error) => return Err(error),
                 }
             }
-        }
-        if resolve_directory(path)? != identity {
-            return Err(failure(
-                ErrorKind::Locked,
-                "project directory changed during registration",
-            ));
-        }
-        transaction
-            .execute(
-                "INSERT INTO projects (engine, name, path) VALUES (?1, ?2, ?3)",
-                params![engine.as_db(), name, path_text],
-            )
-            .map_err(|error| sqlite_error("register project", error))?;
-        let id = transaction.last_insert_rowid();
-        let record = transaction
-            .query_row(
-                "SELECT id, engine, name, path FROM projects WHERE id = ?1",
-                [id],
-                read_record,
-            )
-            .map_err(|error| sqlite_error("read registered project", error))?;
-        let record = into_record(record)?;
-        verify_database_identity(&transaction, &self.database, self.identity)?;
-        transaction
-            .commit()
-            .map_err(|error| sqlite_error("commit registration", error))?;
-        Ok(record)
+            drop(statement);
+            if resolve_directory(path)? != identity {
+                return Err(failure(
+                    ErrorKind::Locked,
+                    "project directory changed during registration",
+                ));
+            }
+            transaction
+                .execute(
+                    "INSERT INTO projects (engine, name, path) VALUES (?1, ?2, ?3)",
+                    params![engine.as_db(), name, path_text],
+                )
+                .map_err(|error| sqlite_error("register project", error))?;
+            let id = transaction.last_insert_rowid();
+            let record = transaction
+                .query_row(
+                    "SELECT id, engine, name, path FROM projects WHERE id = ?1",
+                    [id],
+                    read_record,
+                )
+                .map_err(|error| sqlite_error("read registered project", error))?;
+            into_record(record)
+        })
     }
 
     pub fn list(&self) -> Result<Vec<ProjectRecord>, LibraryError> {
@@ -865,20 +982,11 @@ impl ProjectLibrary {
                 "project ID must be positive",
             ));
         }
-        drop(open_readonly(&self.database, Some(self.identity))?);
-        let mut connection = open_writable(&self.database, self.identity)?;
-        let transaction = connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(|error| sqlite_error("begin removal", error))?;
-        validate_schema(&transaction)?;
-        verify_database_identity(&transaction, &self.database, self.identity)?;
-        let removed = transaction
-            .execute("DELETE FROM projects WHERE id = ?1", [id])
-            .map_err(|error| sqlite_error("remove project registration", error))?;
-        verify_database_identity(&transaction, &self.database, self.identity)?;
-        transaction
-            .commit()
-            .map_err(|error| sqlite_error("commit removal", error))?;
-        Ok(removed != 0)
+        self.write_transaction("removal", |transaction| {
+            let removed = transaction
+                .execute("DELETE FROM projects WHERE id = ?1", [id])
+                .map_err(|error| sqlite_error("remove project registration", error))?;
+            Ok(removed != 0)
+        })
     }
 }

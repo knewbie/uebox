@@ -29,6 +29,7 @@ pub fn configure_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> taur
         project_library::list_registered_projects,
         project_library::register_project,
         project_library::remove_registered_project,
+        project_library::import_registered_projects,
         #[cfg(feature = "godot")]
         godot::launch_godot,
         #[cfg(feature = "godot")]

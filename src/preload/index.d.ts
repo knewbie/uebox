@@ -63,6 +63,7 @@ import type {
 import type { DroppedPathVerdict } from '../shared/droppedPath'
 import type { ImportFailureReport, MissingPlugin, UnavailablePlugin } from '../shared/projectImport'
 import type { ProjectCoverMode } from '../shared/projectCover'
+import type { ProjectRegistrationExportResult } from '../shared/projectRegistration'
 import type { SpotlightAction, SpotlightSearchResponse } from '../shared/spotlight'
 import type { NotebookContextLevel } from '../shared/notebookContext'
 import type { RealtimeEchoGuard } from '../shared/realtimeEchoGuard'
@@ -793,6 +794,7 @@ declare global {
       ) => Promise<{ success: boolean; data: any[]; error?: string }>
     }
     project: {
+      exportRegistration: () => Promise<ProjectRegistrationExportResult>
       saveCover: (
         projectKey: string,
         image: Uint8Array

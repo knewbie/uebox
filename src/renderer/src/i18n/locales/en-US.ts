@@ -45,6 +45,10 @@ export default {
       name: 'Project name',
       path: 'Absolute path to the project directory',
       add: 'Register project',
+      importFile: 'Project registration file exported by the desktop app',
+      importAction: 'Import registrations',
+      imported:
+        '{inserted} added, {alreadyRegistered} already registered, {duplicateInFile} duplicate entries in the file.',
       refresh: 'Refresh list',
       loading: 'Loading registrations…',
       empty: 'No projects registered.',
@@ -61,6 +65,10 @@ export default {
         project_invalid: 'Check the project name, engine, and absolute directory path.',
         project_missing: 'The project directory could not be found.',
         project_duplicate: 'This directory is already registered for this engine.',
+        project_import_invalid: 'The file contains invalid project registration data.',
+        project_import_version: 'This project registration file format or version is unsupported.',
+        project_import_platform: 'The file uses a different system path format.',
+        project_import_size: 'Choose a file up to 1 MiB with at most 4,096 registrations.',
         generic: 'Unable to complete the project registration operation.'
       }
     },
@@ -2089,6 +2097,16 @@ First work out why the install failed from the output above. If you can run comm
         create: 'Create Project',
         createFromTemplate: 'New project from template',
         importExisting: 'Import existing project',
+        exportRegistration: 'Export project registrations for Tauri',
+        registrationExported: '{count} project registrations exported.',
+        registrationExportErrors: {
+          project_registration_export_busy: 'A registration export is already in progress.',
+          project_registration_export_invalid:
+            'The project list contains invalid records or exceeds the transfer limit.',
+          project_registration_export_unavailable: 'Could not read the projects for export.',
+          project_registration_export_exists: 'That file already exists. Choose a new file name.',
+          project_registration_export_write_failed: 'Could not save the project registration file.'
+        },
         refresh: 'Refresh',
         open: 'Open Project',
         openAction: 'Open',

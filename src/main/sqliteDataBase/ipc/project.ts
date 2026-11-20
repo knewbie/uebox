@@ -2,6 +2,7 @@ import { ipcMain } from 'electron'
 import * as fs from 'fs'
 import * as path from 'path'
 import { getPublicDatabase } from '../index'
+import { registerProjectRegistrationExportIPC } from './projectRegistrationExport'
 import {
   createProject,
   getProjectByKey,
@@ -664,6 +665,7 @@ export async function registerProjectByUproject(filePath: string): Promise<Regis
  * 注册项目数据相关的IPC处理函数（公共数据库）
  */
 export const registerProjectIPC = (): void => {
+  registerProjectRegistrationExportIPC()
   ipcMain.handle('db:project:saveCover', async (_, projectKey: string, image: Uint8Array) => {
     try {
       if (

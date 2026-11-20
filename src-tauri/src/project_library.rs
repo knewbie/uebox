@@ -1,6 +1,7 @@
 mod storage;
 #[cfg(test)]
 mod tests;
+mod transfer;
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -67,10 +68,12 @@ fn library_error(error: LibraryError) -> &'static str {
     }
 }
 
-async fn with_library<R, T>(
+async fn with_storage<R, T>(
     app: AppHandle<R>,
     create: bool,
-    operation: impl FnOnce(Option<&mut ProjectLibrary>) -> Result<T, &'static str> + Send + 'static,
+    operation: impl FnOnce(Option<&Path>, &mut Option<ProjectLibrary>) -> Result<T, &'static str>
+        + Send
+        + 'static,
 ) -> Result<T, &'static str>
 where
     R: Runtime,
@@ -86,7 +89,7 @@ where
         let storage = storage::lock_storage(&data_dir, create)?;
         let Some(storage) = storage else {
             return if library.is_none() {
-                operation(None)
+                operation(None, &mut library)
             } else {
                 Err("project_library_invalid")
             };
@@ -95,19 +98,78 @@ where
         if library.is_none() {
             match ProjectLibrary::open_existing(storage.database()) {
                 Ok(existing) => *library = Some(existing),
-                Err(error) if error.kind == ErrorKind::Missing && create => {
-                    *library = Some(
-                        ProjectLibrary::create_new(storage.database()).map_err(library_error)?,
-                    );
-                }
-                Err(error) if error.kind == ErrorKind::Missing => return operation(None),
+                Err(error) if error.kind == ErrorKind::Missing => {}
                 Err(error) => return Err(library_error(error)),
             }
+        }
+        operation(Some(storage.database()), &mut library)
+    })
+    .await
+    .map_err(|_| "project_library_unavailable")?
+}
+
+async fn with_library<R, T>(
+    app: AppHandle<R>,
+    create: bool,
+    operation: impl FnOnce(Option<&mut ProjectLibrary>) -> Result<T, &'static str> + Send + 'static,
+) -> Result<T, &'static str>
+where
+    R: Runtime,
+    T: Send + 'static,
+{
+    with_storage(app, create, move |path, library| {
+        if create && library.is_none() {
+            let path = path.ok_or("project_library_unavailable")?;
+            *library = Some(ProjectLibrary::create_new(path).map_err(library_error)?);
         }
         operation(library.as_mut())
     })
     .await
-    .map_err(|_| "project_library_unavailable")?
+}
+
+fn parse_engine(value: &str) -> Option<EngineKind> {
+    match value {
+        "unreal" => Some(EngineKind::Unreal),
+        "unity" => Some(EngineKind::Unity),
+        "godot" => Some(EngineKind::Godot),
+        _ => None,
+    }
+}
+
+#[derive(Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ImportedProjects {
+    inserted: usize,
+    already_registered: usize,
+    duplicate_in_file: usize,
+}
+
+#[tauri::command]
+pub(crate) async fn import_registered_projects<R: Runtime>(
+    app: AppHandle<R>,
+    manifest: String,
+) -> Result<ImportedProjects, &'static str> {
+    let records = transfer::parse(&manifest)?;
+    if records.is_empty() {
+        return Ok(ImportedProjects::default());
+    }
+    with_storage(app, true, move |path, library| {
+        let summary = if let Some(existing) = library.as_mut() {
+            existing.import_batch(&records).map_err(library_error)?
+        } else {
+            let path = path.ok_or("project_library_unavailable")?;
+            let (created, summary) =
+                ProjectLibrary::create_with_import(path, &records).map_err(library_error)?;
+            *library = Some(created);
+            summary
+        };
+        Ok(ImportedProjects {
+            inserted: summary.inserted,
+            already_registered: summary.already_registered,
+            duplicate_in_file: summary.duplicate_in_file,
+        })
+    })
+    .await
 }
 
 #[tauri::command]
@@ -131,12 +193,7 @@ pub(crate) async fn register_project<R: Runtime>(
     name: String,
     path: String,
 ) -> Result<RegisteredProject, &'static str> {
-    let engine = match engine.as_str() {
-        "unreal" => EngineKind::Unreal,
-        "unity" => EngineKind::Unity,
-        "godot" => EngineKind::Godot,
-        _ => return Err("project_invalid"),
-    };
+    let engine = parse_engine(&engine).ok_or("project_invalid")?;
     if name.trim().is_empty()
         || name.contains('\0')
         || path.contains('\0')

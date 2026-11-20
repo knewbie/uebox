@@ -37,6 +37,7 @@ import type { RealtimeEchoGuard } from '../shared/realtimeEchoGuard'
  * 同名的 `.d.ts`，所以那一份在这里取不到，只能各写一次。
  */
 import type { NamingRulesSavePayload } from '../main/utils/namingRulesConfig'
+import type { ProjectRegistrationExportResult } from '../shared/projectRegistration'
 
 /**
  * `ws:status` / `ws:status-changed` 送过来的那个对象。
@@ -648,6 +649,8 @@ const api = {
     },
     // 项目相关操作（公共数据库）
     project: {
+      exportRegistration: (): Promise<ProjectRegistrationExportResult> =>
+        ipcRenderer.invoke('db:project:exportRegistration'),
       saveCover: (projectKey: string, image: Uint8Array) =>
         ipcRenderer.invoke('db:project:saveCover', projectKey, image),
       restoreAutomaticCover: (projectKey: string) =>

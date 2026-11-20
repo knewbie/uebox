@@ -20,6 +20,15 @@
         >
           <template #icon><PhPlus /></template>
         </AppButton>
+        <AppButton
+          id="project-registration-export"
+          :loading="isExportingRegistration"
+          :title="t('page.home.project.exportRegistration')"
+          :aria-label="t('page.home.project.exportRegistration')"
+          @click="handleExportRegistration"
+        >
+          <template #icon><PhExport /></template>
+        </AppButton>
         <!-- 刷新跟这两个入口是一类事（都是在动工程库本身），放在一起 -->
         <AppButton
           :loading="isRefreshingProjects"
@@ -301,6 +310,7 @@ import { confirmDialog } from '@renderer/utils/dialog'
 import {
   PhArrowClockwise,
   PhCode,
+  PhExport,
   PhFolderMinus,
   PhFolderOpen,
   PhFolderPlus,
@@ -316,6 +326,7 @@ import {
 } from '@phosphor-icons/vue'
 import ProjectCoverModal from './ProjectCoverModal.vue'
 import { projectCoverAPI } from '@renderer/api/projectCover'
+import { projectRegistrationAPI } from '@renderer/api/projectRegistration'
 import { projectCoverMode, type ProjectCoverMode } from '@core/shared/projectCover'
 import { rankProjectSearch } from '@renderer/utils/projectSearch'
 import { useProjects } from '@renderer/hooks/useProjects'
@@ -331,6 +342,26 @@ import { h, ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
+const isExportingRegistration = ref(false)
+
+async function handleExportRegistration(): Promise<void> {
+  if (isExportingRegistration.value) return
+  isExportingRegistration.value = true
+  try {
+    const result = await projectRegistrationAPI.exportRegistration()
+    if (result.success) {
+      message.success(t('page.home.project.registrationExported', { count: result.count }))
+    } else if (result.code !== 'project_registration_export_cancelled') {
+      message.error(t(`page.home.project.registrationExportErrors.${result.code}`))
+    }
+  } catch {
+    message.error(
+      t('page.home.project.registrationExportErrors.project_registration_export_unavailable')
+    )
+  } finally {
+    isExportingRegistration.value = false
+  }
+}
 
 // 已通过 WebSocket 连接的工程列表
 /**

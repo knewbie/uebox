@@ -30,6 +30,38 @@ function deferredReply(): { promise: Promise<unknown>; resolve: (value: unknown)
   return { promise, resolve }
 }
 
+it('imports the chosen file on confirmation and reloads persisted registrations', async () => {
+  const manifest = '{"format":"uebox-project-registration","version":1}'
+  const file = new File([manifest], 'legacy-projects.json', { type: 'application/json' })
+  const read = vi.fn(async () => new TextEncoder().encode(manifest).buffer)
+  Object.defineProperty(file, 'arrayBuffer', { value: read })
+  ipc
+    .mockResolvedValueOnce([])
+    .mockResolvedValueOnce({ inserted: 1, alreadyRegistered: 2, duplicateInFile: 3 })
+    .mockResolvedValueOnce([created])
+  const wrapper = openPanel()
+  await flushPromises()
+
+  expect(wrapper.get('[data-project-import]').attributes('disabled')).toBeDefined()
+  const picker = wrapper.get('input[type="file"]')
+  Object.defineProperty(picker.element, 'files', { value: [file] })
+  await picker.trigger('change')
+  expect(read).not.toHaveBeenCalled()
+  expect(ipc).toHaveBeenCalledTimes(1)
+  await wrapper.get('[data-project-import]').trigger('click')
+  await flushPromises()
+
+  expect(ipc.mock.calls).toEqual([
+    ['list_registered_projects'],
+    ['import_registered_projects', { manifest }],
+    ['list_registered_projects']
+  ])
+  expect(wrapper.text()).toContain('Fixture B')
+  expect(wrapper.text()).toContain('1 added')
+  expect(wrapper.text()).toContain('2 already registered')
+  expect(wrapper.text()).toContain('3 duplicate entries in the file')
+})
+
 it('blocks duplicate reads and writes during the initial list request', async () => {
   const list = deferredReply()
   ipc.mockReturnValueOnce(list.promise)
