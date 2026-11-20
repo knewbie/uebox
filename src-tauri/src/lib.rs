@@ -1,4 +1,5 @@
 mod asset_index;
+mod browser;
 mod chat_history;
 mod desktop;
 mod desktop_browser;
@@ -50,6 +51,7 @@ pub fn configure_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> taur
                 .open_js_links_on_click(false)
                 .build(),
         )
+        .manage(browser::BrowserHost::default())
         .manage(project_library::ProjectRegistrations::default())
         .manage(chat_history::ChatHistoryHost::default())
         .manage(legacy_history::LegacyHistoryHost::default())
@@ -106,6 +108,9 @@ pub fn configure_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> taur
             desktop::desktop_tray,
             desktop_files::open_registered_project_folder,
             desktop_browser::open_isolated_browser,
+            browser::open_browser_window,
+            browser::isolated_browser_status,
+            browser::control_isolated_browser,
             mcp::inspect_mcp_endpoint,
             mcp::list_mcp_endpoints,
             mcp::save_mcp_endpoint,

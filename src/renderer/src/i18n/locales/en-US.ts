@@ -411,6 +411,35 @@ export default {
         credential_invalid_secret: 'Enter a valid access token.'
       }
     },
+    browser: {
+      title: 'Isolated browser',
+      intro: 'Browse manually in a private window restricted to the original HTTPS origin.',
+      controls: 'Browser navigation',
+      back: 'Back',
+      forward: 'Forward',
+      reload: 'Reload page',
+      check: 'Check browser status',
+      checking: 'Checking browser status…',
+      closed: 'Browser window is closed.',
+      opening: 'Opening browser window…',
+      loading: 'Loading page…',
+      opened: 'Browser window is open.',
+      origin: 'Allowed origin',
+      address: 'Current page',
+      navigationBlocked: 'A navigation outside the allowed HTTPS origin was blocked.',
+      downloads: 'Downloads are blocked in this isolated window. No files will be saved.',
+      downloadBlocked: 'A download request was blocked. No file was saved.',
+      historyUnavailable: 'Native back and forward controls are unavailable on this platform.',
+      statusError: 'Unable to read browser status. Check again.',
+      errors: {
+        browser_invalid_url: 'Enter an HTTPS URL without embedded credentials.',
+        browser_already_open: 'Close the current browser window before opening a new one.',
+        browser_invalid_session: 'This browser window has changed. Check its status again.',
+        browser_no_history: 'There is no page in that direction.',
+        browser_history_unavailable: 'Native browser history is unavailable.',
+        browser_unavailable: 'Unable to control the browser. Try again.'
+      }
+    },
     desktop: {
       capture: {
         title: 'Screen recording',
