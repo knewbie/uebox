@@ -1,4 +1,8 @@
 //! One explicitly authorized socket per Unity target. Agent runs never reconnect.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[path = "native_cli/unity_targets.rs"]
+mod native_cli_targets;
+
 use crate::chat_history::{finish_recorded_run, start_recorded_run};
 use crate::settings::{AgentModel, AgentModelSource};
 use crate::unity::{local_target, UnityQueries};

@@ -169,6 +169,10 @@ impl UnityTools {
         Ok(Self { inner })
     }
 
+    pub fn project_root(&self) -> &std::path::Path {
+        self.inner.selection.project().root()
+    }
+
     pub fn run_target(&self) -> RunTarget {
         self.inner.target.clone()
     }

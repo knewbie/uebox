@@ -9,6 +9,7 @@ export type CapabilityId =
   | 'chatHistory'
   | 'legacyHistory'
   | 'modelSettings'
+  | 'nativeCli'
   | 'settings'
 
 export interface HostStatus {

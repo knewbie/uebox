@@ -492,7 +492,8 @@ impl ReadOnlyTool for ProjectInfoTool {
     }
 }
 
-fn public_project_info(result: &Value) -> Value {
+/// Public editor metadata exposed to models and the native console.
+pub fn public_project_info(result: &Value) -> Value {
     let mut output = serde_json::Map::new();
     // Even allowlisted string fields must not serve as arbitrary path payloads.
     for (field, punctuation) in [("projectName", " _-."), ("engineVersion", ".-+")] {

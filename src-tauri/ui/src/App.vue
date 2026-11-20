@@ -7,7 +7,8 @@ import {
   PhChatCircleDots,
   PhClockCounterClockwise,
   PhFolderSimple,
-  PhGear
+  PhGear,
+  PhTerminalWindow
 } from '@phosphor-icons/vue'
 import AppAlert from '@renderer/components/AppAlert.vue'
 import AppButton from '@renderer/components/AppButton.vue'
@@ -20,6 +21,7 @@ import ProjectLibraryPanel from './projects/ProjectLibraryPanel.vue'
 import AgentHistoryPanel from './history/AgentHistoryPanel.vue'
 import LegacyHistoryPanel from './legacy-history/LegacyHistoryPanel.vue'
 import ModelSettingsPanel from './settings/ModelSettingsPanel.vue'
+import NativeCliPanel from './native-cli/NativeCliPanel.vue'
 import type { Locale } from './i18n'
 
 type ThemePreference = 'system' | 'light' | 'dark'
@@ -43,6 +45,9 @@ const projectCollectionsAvailable = computed(() =>
 )
 const settingsAvailable = computed(() =>
   status.value?.capabilities.some(({ id, available }) => id === 'modelSettings' && available)
+)
+const nativeCliAvailable = computed(() =>
+  status.value?.capabilities.some(({ id, available }) => id === 'nativeCli' && available)
 )
 function readTheme(): ThemePreference {
   try {
@@ -142,6 +147,11 @@ onUnmounted(() => colorScheme.removeEventListener('change', onColorSchemeChange)
             </a>
           </li>
           <li v-else><PhGear aria-hidden="true" />{{ t('tauriPreview.capabilities.settings') }}</li>
+          <li v-if="nativeCliAvailable" class="navigation-link">
+            <a href="#native-cli">
+              <PhTerminalWindow aria-hidden="true" />{{ t('tauriPreview.nativeCli.title') }}
+            </a>
+          </li>
         </ul>
       </nav>
       <p class="sidebar__notice">{{ t('tauriPreview.unavailable') }}</p>
@@ -236,6 +246,7 @@ onUnmounted(() => colorScheme.removeEventListener('change', onColorSchemeChange)
         <AgentHistoryPanel v-if="chatHistoryAvailable" />
         <LegacyHistoryPanel v-if="legacyHistoryAvailable" />
         <ModelSettingsPanel v-if="settingsAvailable" />
+        <NativeCliPanel v-if="nativeCliAvailable" />
 
         <UnrealPanel
           v-if="!status || status.engineModules?.unreal === true"

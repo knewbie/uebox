@@ -218,6 +218,24 @@ current collection records intact.
 确认合集文件。成员按引擎与最初登记的绝对路径匹配。若有登记缺失或合集冲突，现有合集记录
 会保留。
 
+### Native CLI / 原生 CLI
+
+On macOS and Linux builds, use **Native CLI → Start CLI endpoint** to start
+the in-process read-only server. Build the console binary and use the directory
+displayed in the app. The server authenticates the local system user, accepts
+the five compiled editor read operations, and only queries connected targets.
+The console can show help and its version while the app is closed.
+
+在 macOS 与 Linux 构建中，从「原生 CLI」启动进程内只读入口，使用界面显示的目录。
+服务器校验本机用户身份，按编译选项公开五种固定读取操作，并只查询已经连接的编辑器。
+应用未启动时，控制台仍可显示帮助与版本。
+
+```sh
+cargo build --locked --manifest-path crates/uebox-cli/Cargo.toml --release
+crates/uebox-cli/target/release/uebox --endpoint "/directory/shown/in/UEBox" doctor --json
+crates/uebox-cli/target/release/uebox --endpoint "/directory/shown/in/UEBox" projects list --json
+```
+
 ### Project registrations / 项目登记
 
 Choose an engine and enter a name and absolute project directory in the preview.

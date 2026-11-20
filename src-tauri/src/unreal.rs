@@ -1,3 +1,7 @@
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[path = "native_cli/unreal_targets.rs"]
+mod native_cli_targets;
+
 use serde::Serialize;
 use std::sync::Arc;
 use std::time::Duration;

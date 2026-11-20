@@ -4452,6 +4452,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "uebox-cli"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "uebox-credentials"
 version = "0.1.0"
 dependencies = [
@@ -4550,6 +4560,7 @@ dependencies = [
  "uebox-agent-godot-tools",
  "uebox-agent-unity-tools",
  "uebox-chat-history",
+ "uebox-cli",
  "uebox-credentials",
  "uebox-engine-core",
  "uebox-engine-unity",

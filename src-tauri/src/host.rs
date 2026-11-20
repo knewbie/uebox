@@ -55,18 +55,24 @@ pub fn read_host_status() -> HostStatus {
             "projectCollections",
             "chatHistory",
             "legacyHistory",
+            "nativeCli",
         ]
         .into_iter()
         .map(|id| Capability {
             id,
-            available: matches!(
-                id,
-                "projectRegistration"
-                    | "projectCollections"
-                    | "chatHistory"
-                    | "legacyHistory"
-                    | "modelSettings"
-            ) && cfg!(any(unix, windows)),
+            available: (id == "nativeCli"
+                && cfg!(all(
+                    any(target_os = "macos", target_os = "linux"),
+                    any(feature = "unity", feature = "unreal", feature = "godot")
+                )))
+                || (matches!(
+                    id,
+                    "projectRegistration"
+                        | "projectCollections"
+                        | "chatHistory"
+                        | "legacyHistory"
+                        | "modelSettings"
+                ) && cfg!(any(unix, windows))),
         })
         .collect(),
     }

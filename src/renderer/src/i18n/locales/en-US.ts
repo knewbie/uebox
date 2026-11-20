@@ -24,6 +24,7 @@ export default {
       agent: 'AI assistant',
       libraries: 'Project and content libraries',
       settings: 'Application settings',
+      nativeCli: 'Native CLI',
       modelSettings: 'Model settings',
       projectCollections: 'Project collections',
       projectRegistration: 'Project registration',
@@ -254,6 +255,20 @@ export default {
         model_profile_import_invalid: 'The selected configuration is invalid.',
         model_profile_import_limit: 'Select a model profile archive up to 512 KiB.',
         model_profile_import_version: 'The configuration format or version is unsupported.'
+      }
+    },
+    nativeCli: {
+      title: 'Native CLI',
+      intro:
+        'Start a read-only endpoint for the native CLI on this account. Only already-connected editor targets can be queried.',
+      endpoint: 'Use this directory with the CLI --endpoint option.',
+      start: 'Start CLI endpoint',
+      stop: 'Stop CLI endpoint',
+      errors: {
+        native_cli_endpoint_busy: 'Another socket already occupies the endpoint.',
+        native_cli_endpoint_invalid:
+          'The local endpoint or its directory failed ownership validation.',
+        generic: 'Unable to open or close the native CLI endpoint.'
       }
     },
     editorAgent: {

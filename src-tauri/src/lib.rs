@@ -5,6 +5,11 @@ mod godot;
 mod godot_agent;
 mod host;
 mod legacy_history;
+#[cfg(all(
+    any(target_os = "macos", target_os = "linux"),
+    any(feature = "unreal", feature = "unity", feature = "godot")
+))]
+mod native_cli;
 mod profile_storage;
 mod project_collections;
 mod project_library;
@@ -47,8 +52,28 @@ pub fn configure_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> taur
                     .destroy_window(window.label());
             }
         });
+    #[cfg(all(
+        any(target_os = "macos", target_os = "linux"),
+        any(feature = "unreal", feature = "unity", feature = "godot")
+    ))]
+    let builder = builder.manage(native_cli::NativeCli::default());
     builder.invoke_handler(tauri::generate_handler![
         host::host_status,
+        #[cfg(all(
+            any(target_os = "macos", target_os = "linux"),
+            any(feature = "unreal", feature = "unity", feature = "godot")
+        ))]
+        native_cli::native_cli_endpoint,
+        #[cfg(all(
+            any(target_os = "macos", target_os = "linux"),
+            any(feature = "unreal", feature = "unity", feature = "godot")
+        ))]
+        native_cli::start_native_cli,
+        #[cfg(all(
+            any(target_os = "macos", target_os = "linux"),
+            any(feature = "unreal", feature = "unity", feature = "godot")
+        ))]
+        native_cli::stop_native_cli,
         chat_history::list_agent_chats,
         chat_history::get_agent_chat,
         legacy_history::import_legacy_chat_history,
@@ -141,7 +166,16 @@ pub fn configure_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> taur
 }
 
 pub fn run() {
-    configure_commands(tauri::Builder::default())
-        .run(tauri::generate_context!())
-        .expect("failed to run the Tauri host");
+    let app = configure_commands(tauri::Builder::default())
+        .build(tauri::generate_context!())
+        .expect("failed to build the Tauri host");
+    app.run(|_handle, _event| {
+        #[cfg(all(
+            any(target_os = "macos", target_os = "linux"),
+            any(feature = "unreal", feature = "unity", feature = "godot")
+        ))]
+        if matches!(_event, tauri::RunEvent::Exit) {
+            let _ = tauri::async_runtime::block_on(native_cli::stop_native_cli(_handle.clone()));
+        }
+    });
 }

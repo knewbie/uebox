@@ -23,6 +23,7 @@ export default {
       agent: 'AI 助手',
       libraries: '项目库与资料库',
       settings: '应用设置',
+      nativeCli: '原生 CLI',
       modelSettings: '模型设置',
       projectCollections: '项目合集',
       projectRegistration: '项目登记',
@@ -247,6 +248,18 @@ export default {
         model_profile_import_invalid: '选择的模型配置文件无效。',
         model_profile_import_limit: '请选择不超过 512 KiB 的模型配置文件。',
         model_profile_import_version: '不支持此模型配置的格式或版本。'
+      }
+    },
+    nativeCli: {
+      title: '原生 CLI',
+      intro: '为当前系统用户启动原生 CLI 只读入口。命令只能查询已经连接的编辑器。',
+      endpoint: '将此目录用于 CLI 的 --endpoint 参数。',
+      start: '启动 CLI 入口',
+      stop: '停止 CLI 入口',
+      errors: {
+        native_cli_endpoint_busy: '已有本机套接字占用该入口。',
+        native_cli_endpoint_invalid: '本机入口或目录未通过归属校验。',
+        generic: '无法启动或停止原生 CLI 入口。'
       }
     },
     editorAgent: {

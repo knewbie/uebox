@@ -1,4 +1,8 @@
 //! Fixed-target, read-only Godot Agent preview. Nothing here discovers editors.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[path = "native_cli/godot_targets.rs"]
+mod native_cli_targets;
+
 use crate::chat_history::{finish_recorded_run, start_recorded_run};
 use crate::godot::{GodotSessions, SessionHandle};
 use crate::settings::{AgentModel, AgentModelSource};
