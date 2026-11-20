@@ -22,13 +22,44 @@ export default {
       engines: '完整引擎连接',
       agent: 'AI 助手',
       libraries: '项目库与资料库',
-      settings: '应用设置'
+      settings: '应用设置',
+      projectRegistration: '项目登记'
     },
     language: '语言',
     appearance: '外观',
     system: '跟随系统',
     light: '明亮',
     dark: '深色',
+    projectLibrary: {
+      title: '项目登记',
+      intro: '手动登记已有项目的目录。移除登记记录时会保留项目文件。',
+      engine: '引擎',
+      chooseEngine: '请选择引擎',
+      engines: {
+        unreal: '虚幻引擎',
+        unity: 'Unity',
+        godot: 'Godot'
+      },
+      name: '项目名称',
+      path: '项目目录的绝对路径',
+      add: '登记项目',
+      refresh: '刷新列表',
+      loading: '正在读取登记记录…',
+      empty: '暂无登记的项目。',
+      remove: '移除登记',
+      removeNamed: '移除「{name}」的登记记录',
+      listError: '无法读取项目登记记录',
+      errors: {
+        project_library_invalid: '项目登记文件无效，或使用了不支持的格式。',
+        project_library_locked: '项目登记库正忙，请重试。',
+        project_library_unavailable: '项目登记库当前不可用。',
+        project_library_recovery_required: '项目登记库需要恢复后才能使用。',
+        project_invalid: '请检查项目名称、引擎和目录的绝对路径。',
+        project_missing: '找不到项目目录。',
+        project_duplicate: '此目录已在该引擎下登记。',
+        generic: '无法完成项目登记操作。'
+      }
+    },
     godotAgent: {
       title: 'Godot 只读助手预览',
       intro:

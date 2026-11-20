@@ -3,6 +3,7 @@ mod godot;
 #[cfg(feature = "godot")]
 mod godot_agent;
 mod host;
+mod project_library;
 #[cfg(feature = "unity")]
 mod unity;
 #[cfg(feature = "unreal")]
@@ -12,6 +13,7 @@ pub use host::{read_host_status, Capability, EngineModules, HostStatus};
 
 /// Register the deliberately small command surface on a Tauri runtime.
 pub fn configure_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
+    let builder = builder.manage(project_library::ProjectRegistrations::default());
     #[cfg(feature = "godot")]
     let builder = builder.manage(godot::GodotSessions::default());
     #[cfg(feature = "unity")]
@@ -20,6 +22,9 @@ pub fn configure_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> taur
     let builder = builder.manage(unreal::UnrealListenerState::default());
     builder.invoke_handler(tauri::generate_handler![
         host::host_status,
+        project_library::list_registered_projects,
+        project_library::register_project,
+        project_library::remove_registered_project,
         #[cfg(feature = "godot")]
         godot::launch_godot,
         #[cfg(feature = "godot")]

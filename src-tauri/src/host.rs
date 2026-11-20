@@ -45,13 +45,19 @@ pub fn read_host_status() -> HostStatus {
             unreal: cfg!(feature = "unreal"),
             godot: cfg!(feature = "godot"),
         },
-        capabilities: ["engines", "agent", "libraries", "settings"]
-            .into_iter()
-            .map(|id| Capability {
-                id,
-                available: false,
-            })
-            .collect(),
+        capabilities: [
+            "engines",
+            "agent",
+            "libraries",
+            "settings",
+            "projectRegistration",
+        ]
+        .into_iter()
+        .map(|id| Capability {
+            id,
+            available: id == "projectRegistration" && cfg!(any(unix, windows)),
+        })
+        .collect(),
     }
 }
 

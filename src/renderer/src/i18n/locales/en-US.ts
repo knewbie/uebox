@@ -23,13 +23,47 @@ export default {
       engines: 'Engine connections (full)',
       agent: 'AI assistant',
       libraries: 'Project and content libraries',
-      settings: 'Application settings'
+      settings: 'Application settings',
+      projectRegistration: 'Project registration'
     },
     language: 'Language',
     appearance: 'Appearance',
     system: 'System',
     light: 'Light',
     dark: 'Dark',
+    projectLibrary: {
+      title: 'Project registration',
+      intro:
+        'Register existing project directories manually. Removing a registration leaves the project files in place.',
+      engine: 'Engine',
+      chooseEngine: 'Choose an engine',
+      engines: {
+        unreal: 'Unreal Engine',
+        unity: 'Unity',
+        godot: 'Godot'
+      },
+      name: 'Project name',
+      path: 'Absolute path to the project directory',
+      add: 'Register project',
+      refresh: 'Refresh list',
+      loading: 'Loading registrations…',
+      empty: 'No projects registered.',
+      remove: 'Remove registration',
+      removeNamed: 'Remove registration for {name}',
+      listError: 'Unable to load project registrations',
+      errors: {
+        project_library_invalid:
+          'The project registry file is invalid or uses an unsupported format.',
+        project_library_locked: 'The project registry is busy. Try again.',
+        project_library_unavailable: 'The project registry is unavailable.',
+        project_library_recovery_required:
+          'The project registry needs recovery before it can be used.',
+        project_invalid: 'Check the project name, engine, and absolute directory path.',
+        project_missing: 'The project directory could not be found.',
+        project_duplicate: 'This directory is already registered for this engine.',
+        generic: 'Unable to complete the project registration operation.'
+      }
+    },
     godotAgent: {
       title: 'Godot read-only assistant preview',
       intro:

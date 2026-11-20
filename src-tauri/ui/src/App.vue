@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { PhBookOpen, PhChatCircleDots, PhFolderSimple, PhGear } from '@phosphor-icons/vue'
 import AppAlert from '@renderer/components/AppAlert.vue'
@@ -9,6 +9,7 @@ import { getHostStatus, type HostStatus } from './host'
 import UnityPanel from './engines/unity/UnityPanel.vue'
 import UnrealPanel from './engines/unreal/UnrealPanel.vue'
 import GodotPanel from './engines/godot/GodotPanel.vue'
+import ProjectLibraryPanel from './projects/ProjectLibraryPanel.vue'
 import type { Locale } from './i18n'
 
 type ThemePreference = 'system' | 'light' | 'dark'
@@ -16,6 +17,11 @@ type ThemePreference = 'system' | 'light' | 'dark'
 const { t, locale } = useI18n()
 const status = ref<HostStatus | null>(null)
 const hostError = ref<string | null>(null)
+const projectRegistrationAvailable = computed(() =>
+  status.value?.capabilities.some(
+    ({ id, available }) => id === 'projectRegistration' && available === true
+  )
+)
 function readTheme(): ThemePreference {
   try {
     const value = localStorage.getItem('app-theme')
@@ -90,7 +96,12 @@ onUnmounted(() => colorScheme.removeEventListener('change', onColorSchemeChange)
       </div>
       <nav :aria-label="t('tauriPreview.capabilitiesTitle')">
         <ul class="navigation">
-          <li><PhFolderSimple aria-hidden="true" />{{ t('menu.projectLib') }}</li>
+          <li v-if="projectRegistrationAvailable" class="navigation-link">
+            <a href="#project-registration">
+              <PhFolderSimple aria-hidden="true" />{{ t('menu.projectLib') }}
+            </a>
+          </li>
+          <li v-else><PhFolderSimple aria-hidden="true" />{{ t('menu.projectLib') }}</li>
           <li><PhChatCircleDots aria-hidden="true" />{{ t('menu.aiAssistant') }}</li>
           <li><PhBookOpen aria-hidden="true" />{{ t('menu.notebooks') }}</li>
           <li><PhGear aria-hidden="true" />{{ t('tauriPreview.capabilities.settings') }}</li>
@@ -180,6 +191,8 @@ onUnmounted(() => colorScheme.removeEventListener('change', onColorSchemeChange)
             </div>
           </dl>
         </section>
+
+        <ProjectLibraryPanel v-if="projectRegistrationAvailable" />
 
         <UnrealPanel
           v-if="!status || status.engineModules?.unreal === true"
@@ -285,6 +298,17 @@ body {
   gap: var(--space-3);
   padding: var(--space-3);
   color: var(--color-text-muted);
+}
+.navigation .navigation-link {
+  padding: 0;
+}
+.navigation-link a {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-3);
+  color: var(--color-text-primary);
 }
 .sidebar__notice {
   margin: auto var(--space-3) 0;

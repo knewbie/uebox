@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
 
-export type CapabilityId = 'engines' | 'agent' | 'libraries' | 'settings'
+export type CapabilityId = 'engines' | 'agent' | 'libraries' | 'projectRegistration' | 'settings'
 
 export interface HostStatus {
   backend: 'rust'

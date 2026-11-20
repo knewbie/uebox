@@ -74,14 +74,43 @@ existing locale namespace remain engine-neutral.
 `host_status` returns `backend`, `processId`,
 `os`, `architecture`, `version`, `migration`, `engineModules: { unity, unreal, godot }`
 and a list of `{ id, available }`
-capabilities. The values describing the process and platform come from Rust. Engine
-support, the agent, libraries and application settings are marked unavailable
-until their implementations are integrated. There is no generic IPC channel.
+capabilities. The values describing the process and platform come from Rust.
+`projectRegistration` identifies the manual registry preview, independently of
+the selected engine features. The `libraries` capability tracks migration of
+the full libraries feature.
 
 `host_status` 返回 `backend`、`processId`、`os`、`architecture`、
 `version`、`migration`、`engineModules: { unity, unreal, godot }` 和 `{ id, available }`
 能力列表。`engineModules` 表示编译进当前宿主的适配器。进程与平台字段由 Rust
-读取；完整引擎功能、Agent、资料库和应用设置在实现接入前均标记为不可用。没有通用 IPC 通道。
+读取。`projectRegistration` 表示手工登记预览，独立于引擎编译选项。`libraries`
+表示完整项目库和资料库的迁移状态。
+
+### Project registrations / 项目登记
+
+Choose an engine and enter a name and absolute project directory in the preview.
+`list_registered_projects`, `register_project`, and `remove_registered_project`
+manage the same registry across restarts. Registration requires an online directory.
+Removing a record preserves the project files, and offline records can be removed.
+The decimal string `id` identifies a record without losing SQLite integer precision.
+
+The first registration creates `project-library/library.sqlite` within the Tauri
+preview's application-local data directory. The Rust host holds a process-shared
+file lock while operating on the database. Unix checks the storage mode bits;
+Windows relies on the application's LocalAppData permissions and rejects reparse
+points. These checks assume a trusted local user profile. Incompatible databases
+and rollback journals are preserved and reported. Crash recovery remains out of
+the preview, and the Electron database is separate.
+
+在预览中选择引擎，并输入名称与项目目录的绝对路径。`list_registered_projects`、
+`register_project` 和 `remove_registered_project` 操作同一个可跨重启持久化的登记库。
+登记时目录必须在线。可以移除离线记录，项目文件会保留。记录 ID 用十进制字符串传递，
+以保留 SQLite 整数精度。
+
+首次登记在 Tauri 预览应用的本地数据目录创建 `project-library/library.sqlite`。
+Rust 宿主在每次操作期间持有跨进程文件锁。Unix 检查目录和文件的权限位，
+Windows 依赖应用的 LocalAppData 权限并拒绝重解析点。这些检查以可信的本机用户配置
+目录为前提。不兼容的数据库和回滚日志会保留，并在界面提示。崩溃恢复尚待接入，
+Electron 数据库独立存放。
 
 `inspect_unity({ projectRoot, port, allowClientTakeover })` requires an existing absolute project directory,
 an explicit nonzero TCP port, and `allowClientTakeover: true`. Omitted, false, or

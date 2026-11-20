@@ -116,6 +116,40 @@ describe('Tauri migration preview', () => {
     expect(invoke).toHaveBeenCalledWith('host_status')
   })
 
+  it('links to project registration when the host enables it with every engine disabled', async () => {
+    const capabilities = [{ id: 'projectRegistration', available: true }] as const
+    vi.mocked(getHostStatus).mockResolvedValue({
+      ...actualHostStatus,
+      capabilities,
+      engineModules: { unity: false, unreal: false, godot: false }
+    })
+    vi.mocked(invoke).mockResolvedValue([])
+    const wrapper = mount(App, { global: { plugins: [createAppI18n('en-US')] } })
+    await flushPromises()
+
+    expect(wrapper.get('nav a[href="#project-registration"]').text()).toBe('Project Library')
+    expect(wrapper.get('#project-registration').text()).toContain('Project registration')
+    expect(invoke).toHaveBeenCalledExactlyOnceWith('list_registered_projects')
+    wrapper.unmount()
+  })
+
+  it.each([
+    { capabilities: [] },
+    { capabilities: [{ id: 'projectRegistration', available: false }] as const }
+  ])(
+    'keeps project registration unavailable without an enabled capability (%j)',
+    async ({ capabilities }) => {
+      vi.mocked(getHostStatus).mockResolvedValue({ ...actualHostStatus, capabilities })
+      const wrapper = mount(App, { global: { plugins: [createAppI18n('en-US')] } })
+      await flushPromises()
+
+      expect(wrapper.find('nav a[href="#project-registration"]').exists()).toBe(false)
+      expect(wrapper.find('#project-registration').exists()).toBe(false)
+      expect(invoke).not.toHaveBeenCalledWith('list_registered_projects')
+      wrapper.unmount()
+    }
+  )
+
   it('does not start the UE listener before the user clicks', async () => {
     vi.mocked(getHostStatus).mockResolvedValue(actualHostStatus)
     const wrapper = mount(App, { global: { plugins: [createAppI18n('en-US')] } })

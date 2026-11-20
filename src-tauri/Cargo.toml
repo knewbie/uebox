@@ -27,6 +27,7 @@ tauri-build = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri = { version = "2", features = [] }
+uebox-project-library = { path = "../crates/uebox-project-library" }
 uebox-engine-unity = { path = "../crates/uebox-engine-unity", optional = true }
 uebox-engine-unreal = { path = "../crates/uebox-engine-unreal", optional = true }
 uebox-godot-session = { path = "../crates/uebox-godot-session", optional = true }
@@ -38,6 +39,7 @@ tokio = { version = "1", features = ["rt", "time"], optional = true }
 
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }
+tempfile = "3"
 futures-util = { version = "0.3", features = ["sink"] }
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "sync", "time"] }
 tokio-tungstenite = "0.26"
