@@ -277,12 +277,12 @@ pub fn run() {
         })
         .build(tauri::generate_context!())
         .expect("failed to build the Tauri host");
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", windows))]
     let recording_exit_ready = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", windows))]
     let mut stopping_recording = false;
     app.run(move |_handle, _event| {
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", windows))]
         if let tauri::RunEvent::ExitRequested { api, .. } = &_event {
             use std::sync::atomic::Ordering;
             if !recording_exit_ready.load(Ordering::Acquire)

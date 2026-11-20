@@ -58,6 +58,29 @@ tauri-plugin-dialog = "2.8.4"
 tauri-plugin-global-shortcut = "2.4.1"
 uebox-cli = { path = "../crates/uebox-cli", optional = true }
 
+[target.'cfg(windows)'.dependencies]
+# Windows Graphics Capture into an H.264 MP4 through Media Foundation. The feature list is exactly
+# the projection surface `screen_recording/windows/backend.rs` names: the WinRT metadata namespaces
+# plus Direct3D 11, DXGI and Media Foundation, and the two that do not look like capture features —
+# Win32_System_WinRT (RoInitialize + CreateDispatcherQueueController) and Win32_UI_Shell
+# (IInitializeWithWindow, which is what binds the system picker to this window).
+windows = { version = "0.62.2", features = [
+    "Foundation",
+    "Graphics",
+    "Graphics_Capture",
+    "Graphics_DirectX",
+    "Graphics_DirectX_Direct3D11",
+    "Win32_Foundation",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Media_MediaFoundation",
+    "Win32_System_WinRT",
+    "Win32_System_WinRT_Direct3D11",
+    "Win32_UI_Shell",
+] }
+
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }
 futures-util = { version = "0.3", features = ["sink"] }

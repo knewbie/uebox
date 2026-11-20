@@ -1,10 +1,23 @@
 //! Explicit, main-window-only recording. Parent integration registers these three
-//! commands and links native/macos/capture.m; no managed state is required.
+//! commands and links native/macos/capture.m on macOS; no managed state is required.
 mod files;
 mod native;
 mod state;
 #[cfg(test)]
 mod tests;
+// Both capture modules compile on every host and refuse where they cannot run, so the neutral
+// lifecycle tests stay in the suite on macOS and Linux. Off Windows nothing in the driver is
+// reachable by design — only `available()` is, and that one answers false — so dead code is
+// expected there rather than a hole in the port. A Windows build keeps the full lint.
+#[cfg_attr(not(windows), allow(dead_code))]
+mod windows;
+
+// The two modules cannot be aliased to one name (`mod native;` plus `use ... as native;` is
+// E0255), so the platform selector is called `backend`.
+#[cfg(not(windows))]
+use self::native as backend;
+#[cfg(windows)]
+use self::windows as backend;
 
 use files::Workspace;
 use serde::Serialize;
@@ -60,7 +73,7 @@ pub(crate) async fn screen_recording_status<R: Runtime>(
     let state = machine()?;
     Ok(ScreenRecordingStatus::from_snapshot(
         state.snapshot(),
-        native::available(),
+        backend::available(),
     ))
 }
 
@@ -72,7 +85,7 @@ pub(crate) async fn start_screen_recording<R: Runtime>(
 ) -> Result<ScreenRecordingStatus, &'static str> {
     authorize(window.label())?;
     let mut state = machine()?;
-    let supported = native::available();
+    let supported = backend::available();
     check_start(window.label(), opt_in, supported, state.busy())?;
     let app_local = window
         .app_handle()
@@ -90,8 +103,21 @@ pub(crate) async fn start_screen_recording<R: Runtime>(
     let path = CString::new(work.path().to_str().ok_or(UNAVAILABLE)?).map_err(|_| UNAVAILABLE)?;
     let token = state.begin(work, audio)?;
     // Hold the same lock through both FFI dispatches: stop cannot enqueue before
-    // start. capture.m always dispatches callbacks asynchronously on main_queue.
-    native::start(&path, audio, token, recording_event);
+    // start. Neither host ever calls back synchronously: capture.m dispatches on
+    // main_queue, and the Windows driver works on its own capture thread.
+    // The Windows driver takes one argument the macOS ABI has no counterpart for: the
+    // window the system picker is presented against. It is read but never interpreted,
+    // and a window without a handle refuses the capture instead of recording modally.
+    #[cfg(windows)]
+    backend::start(
+        &path,
+        audio,
+        token,
+        recording_event,
+        windows::Parent::from_raw(window.hwnd().map_err(|_| UNAVAILABLE)?.0 as usize),
+    );
+    #[cfg(not(windows))]
+    backend::start(&path, audio, token, recording_event);
     Ok(ScreenRecordingStatus::from_snapshot(
         state.snapshot(),
         supported,
@@ -107,11 +133,11 @@ pub(crate) async fn stop_screen_recording<R: Runtime>(
     let token = parse_token(&token)?;
     let mut state = machine()?;
     if state.stop(token)? {
-        native::stop(token);
+        backend::stop(token);
     }
     Ok(ScreenRecordingStatus::from_snapshot(
         state.snapshot(),
-        native::available(),
+        backend::available(),
     ))
 }
 
@@ -142,7 +168,7 @@ pub(crate) async fn reveal_screen_recording<R: Runtime>(
     .map_err(|_| UNAVAILABLE)?
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 pub(crate) fn stop_for_shutdown() -> bool {
     let Ok(mut state) = machine() else {
         return false;
@@ -152,7 +178,7 @@ pub(crate) fn stop_for_shutdown() -> bool {
     }
     if let Some(token) = state.snapshot().token {
         if state.stop(token) == Ok(true) {
-            native::stop(token);
+            backend::stop(token);
         }
     }
     true
