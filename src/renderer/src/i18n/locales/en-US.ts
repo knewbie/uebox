@@ -549,6 +549,24 @@ export default {
       error: 'Unreal operation failed'
     },
     unity: {
+      nameWrite: {
+        optIn: 'Allow the assistant to request renaming the selected GameObject',
+        connect: 'Connect assistant with rename requests',
+        title: 'GameObject rename approvals',
+        change: 'Rename “{oldName}” to “{newName}”?',
+        identity:
+          'Scene {sceneHandle}, object {gameObjectInstanceId}. The scene will remain unsaved.',
+        approve: 'Approve rename',
+        decline: 'Decline',
+        expired: 'This approval is no longer available.',
+        status: {
+          applied: 'Renamed to “{name}” in the editor.',
+          mismatch: 'The editor read back “{name}”.',
+          not_executed: 'The rename was not performed.',
+          unknown:
+            'The final name could not be confirmed. Inspect the Unity editor before continuing.'
+        }
+      },
       title: 'Unity read-only query',
       intro:
         'Connect to the selected local Unity MCP port to read the project and active scene. No automatic discovery or reconnection is performed.',

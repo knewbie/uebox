@@ -763,3 +763,80 @@ fn rejects_unbounded_options_before_opening_a_socket() {
         matches!(listener.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock)
     );
 }
+
+#[test]
+fn guarded_rename_validates_readback_and_never_retries_after_a_lost_reply() {
+    use serde_json::{json, Value};
+    use uebox_engine_unity::GameObjectNameOutcome;
+
+    for lose_reply in [false, true] {
+        let listener = listener();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let mut stream = accept(&listener);
+            stream
+                .write_all(b"WELCOME UNITY-MCP 1 FRAMING=1\n")
+                .unwrap();
+            for _ in 0..2 {
+                assert_project_request(&mut stream);
+                write_frame(&mut stream, &project_response(project_a()));
+            }
+            let command = "uebox_prepare_or_apply_gameobject_name";
+            let prepare: Value = serde_json::from_slice(&read_frame(&mut stream)).unwrap();
+            assert_eq!(
+                prepare,
+                json!({"type":command,"params":{"action":"prepare","newName":"New"}})
+            );
+            let ticket = "0123456789abcdef".repeat(4);
+            let receipt = |data| {
+                json!({"status":"success", "result":{"success":true,"data":data}}).to_string()
+            };
+            write_frame(
+                &mut stream,
+                &receipt(json!({
+                    "preview":{"sceneHandle":12,"gameObjectInstanceId":-19,"oldName":"Old"},
+                    "proposedName":"New","ticket":ticket,"expiresInSeconds":30.0
+                })),
+            );
+            assert_project_request(&mut stream);
+            write_frame(&mut stream, &project_response(project_a()));
+            let apply: Value = serde_json::from_slice(&read_frame(&mut stream)).unwrap();
+            assert_eq!(
+                apply,
+                json!({"type":command,"params":{"action":"apply","ticket":ticket}})
+            );
+            if !lose_reply {
+                write_frame(
+                    &mut stream,
+                    &receipt(json!({
+                        "status":"applied","sceneHandle":12,"gameObjectInstanceId":-19,
+                        "oldName":"Old","newName":"New","saved":false
+                    })),
+                );
+            }
+        });
+
+        let mut client = connect(address, project_a(), 500).unwrap();
+        let proposal = client.prepare_selected_game_object_name("New").unwrap();
+        assert_eq!(proposal.old_name(), "Old");
+        assert_eq!(proposal.scene_handle(), 12);
+        assert_eq!(proposal.game_object_instance_id(), -19);
+        assert_eq!(
+            client.apply_selected_game_object_name(proposal),
+            if lose_reply {
+                GameObjectNameOutcome::Unknown
+            } else {
+                GameObjectNameOutcome::Applied {
+                    actual_name: "New".to_owned(),
+                }
+            }
+        );
+        if lose_reply {
+            assert!(matches!(
+                client.project_info(),
+                Err(BridgeError::Disconnected)
+            ));
+        }
+        server.join().unwrap();
+    }
+}

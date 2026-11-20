@@ -24,6 +24,8 @@ mod settings;
 mod unity;
 #[cfg(feature = "unity")]
 mod unity_agent;
+#[cfg(feature = "unity")]
+mod unity_rename_tool;
 #[cfg(feature = "unreal")]
 mod unreal;
 #[cfg(feature = "unreal")]
@@ -32,6 +34,8 @@ mod unreal_actor_tool;
 mod unreal_agent;
 #[cfg(feature = "unreal")]
 mod unreal_approval;
+#[cfg(feature = "unity")]
+mod write_approval;
 
 pub use host::{read_host_status, Capability, EngineModules, HostStatus};
 
@@ -56,7 +60,17 @@ pub fn configure_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> taur
     #[cfg(feature = "godot")]
     let builder = builder.manage(godot::GodotSessions::default());
     #[cfg(feature = "unity")]
-    let builder = builder.manage(unity::UnityQueries::default());
+    let builder = builder
+        .manage(unity::UnityQueries::default())
+        .on_window_event(|window, event| {
+            use tauri::Manager;
+            if matches!(event, tauri::WindowEvent::Destroyed) {
+                window
+                    .state::<unity::UnityQueries>()
+                    .agent
+                    .destroy_window(window.label());
+            }
+        });
     #[cfg(feature = "unreal")]
     let builder = builder
         .manage(unreal::UnrealListenerState::default())
@@ -173,6 +187,10 @@ pub fn configure_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> taur
             unity_agent::cancel_unity_agent,
             #[cfg(feature = "unity")]
             unity_agent::close_unity_agent,
+            #[cfg(feature = "unity")]
+            unity_agent::list_unity_name_activity,
+            #[cfg(feature = "unity")]
+            unity_agent::answer_unity_name_approval,
             #[cfg(feature = "unreal")]
             unreal::start_unreal_listener,
             #[cfg(feature = "unreal")]

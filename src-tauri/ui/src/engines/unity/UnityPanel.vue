@@ -6,6 +6,8 @@ import AppAlert from '@renderer/components/AppAlert.vue'
 import AppButton from '@renderer/components/AppButton.vue'
 import AppCheckbox from '@renderer/components/AppCheckbox.vue'
 import EditorAgentPanel from '../../agent/AgentPanel.vue'
+import type { AgentTarget } from '../../agent/commands'
+import NameApprovalPanel from './NameApprovalPanel.vue'
 import { isAbsoluteProjectPath } from '../projectPath'
 import { attachUnityAgentTarget, releaseUnityAgentTarget } from './agentTarget'
 import { inspectUnity, type UnityInspection } from './commands'
@@ -19,6 +21,14 @@ const unityLoading = ref(false)
 const unityError = ref<string | null>(null)
 const unityResult = ref<UnityInspection | null>(null)
 const agentTarget = ref<{ sessionId: string } | null>(null)
+const optIntoNames = ref(false)
+const agentId = ref<string | null>(null)
+const targetForAgent = computed<AgentTarget | null>(() => {
+  if (!agentTarget.value || targetChanging.value) return null
+  return optIntoNames.value
+    ? { ...agentTarget.value, allowGameObjectRename: true }
+    : agentTarget.value
+})
 const targetChanging = ref(false)
 const targetError = ref(false)
 let unmounted = false
@@ -44,6 +54,7 @@ watch(
   [unityProject, unityPort],
   () => {
     unityTakeoverAllowed.value = false
+    optIntoNames.value = false
     unityResult.value = null
     unityError.value = null
     targetError.value = false
@@ -111,6 +122,10 @@ async function releaseAgent(): Promise<void> {
     }
   } finally {
     targetChanging.value = false
+    if (!agentTarget.value) {
+      optIntoNames.value = false
+      agentId.value = null
+    }
   }
 }
 
@@ -157,6 +172,9 @@ onUnmounted(() => {
       <AppCheckbox v-model:checked="unityTakeoverAllowed" :disabled="inputLocked">
         {{ t('tauriPreview.unity.confirm') }}
       </AppCheckbox>
+      <AppCheckbox v-model:checked="optIntoNames" :disabled="inputLocked" data-unity-allow-rename>
+        {{ t('tauriPreview.unity.nameWrite.optIn') }}
+      </AppCheckbox>
       <AppButton
         data-unity-query
         html-type="submit"
@@ -171,7 +189,11 @@ onUnmounted(() => {
         :disabled="!canQueryUnity"
         :loading="targetChanging"
         @click="attachAgent"
-        >{{ t('tauriPreview.unity.attachAgent') }}</AppButton
+        >{{
+          t(
+            optIntoNames ? 'tauriPreview.unity.nameWrite.connect' : 'tauriPreview.unity.attachAgent'
+          )
+        }}</AppButton
       >
       <AppButton
         v-else
@@ -199,9 +221,11 @@ onUnmounted(() => {
     <EditorAgentPanel
       v-if="agentTarget"
       engine="unity"
-      :target="targetChanging ? null : agentTarget"
+      :target="targetForAgent"
+      @agent-changed="agentId = $event"
       :target-label="agentTarget.sessionId"
     />
+    <NameApprovalPanel v-if="optIntoNames && agentId" :key="agentId" :agent-id="agentId" />
     <div v-if="unityResult" class="unity-result" data-unity-result>
       <h3>{{ t('tauriPreview.unity.project') }}</h3>
       <dl class="unity-details">

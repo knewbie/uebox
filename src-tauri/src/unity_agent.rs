@@ -6,6 +6,7 @@ mod native_cli_targets;
 use crate::chat_history::{finish_recorded_run, start_recorded_run};
 use crate::settings::{AgentModel, AgentModelSource};
 use crate::unity::{local_target, UnityQueries};
+use crate::unity_rename_tool::{register_selected_name, Proposal, Receipt, UnityNameWrites};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -25,6 +26,39 @@ const IDLE_PROBE_INTERVAL: Duration = Duration::from_secs(8);
 pub(crate) struct UnityAgentHost {
     registry: Arc<Mutex<EngineRegistry>>,
     state: Mutex<HostState>,
+    name_writes: Arc<UnityNameWrites>,
+}
+
+impl UnityAgentHost {
+    pub(crate) fn destroy_window(&self, owner: &str) {
+        self.name_writes.revoke_owner(owner);
+        let removed = {
+            let mut state = lock(&self.state);
+            let targets: Vec<_> = state
+                .targets
+                .iter()
+                .filter(|(_, target)| target.owner == owner)
+                .map(|(id, _)| id.clone())
+                .collect();
+            let removed: Vec<_> = targets
+                .iter()
+                .filter_map(|id| state.retire_target(id))
+                .collect();
+            for agent in state
+                .agents
+                .values_mut()
+                .filter(|agent| agent.owner == owner)
+            {
+                agent.closed = true;
+                agent.stop();
+            }
+            state.agents.retain(|_, agent| agent.retain());
+            removed
+        };
+        for target in removed {
+            tauri::async_runtime::spawn(async move { target.tools.close().await });
+        }
+    }
 }
 
 #[derive(Default)]
@@ -362,13 +396,20 @@ pub(crate) async fn create_unity_agent<R: Runtime>(
     endpoint: String,
     model: String,
     credential: Option<String>,
+    allow_game_object_rename: Option<bool>,
 ) -> Result<CreatedAgent, String> {
     let source = AgentModelSource::Direct {
         endpoint,
         model,
         credential,
     };
-    create_unity_with_model(window, session_id, source).await
+    create_unity_with_model(
+        window,
+        session_id,
+        source,
+        allow_game_object_rename.unwrap_or(false),
+    )
+    .await
 }
 
 #[tauri::command]
@@ -376,15 +417,23 @@ pub(crate) async fn create_unity_agent_from_profile<R: Runtime>(
     window: tauri::WebviewWindow<R>,
     session_id: String,
     profile_id: Option<String>,
+    allow_game_object_rename: Option<bool>,
 ) -> Result<CreatedAgent, String> {
     let source = AgentModelSource::Saved { profile_id };
-    create_unity_with_model(window, session_id, source).await
+    create_unity_with_model(
+        window,
+        session_id,
+        source,
+        allow_game_object_rename.unwrap_or(false),
+    )
+    .await
 }
 
 async fn create_unity_with_model<R: Runtime>(
     window: tauri::WebviewWindow<R>,
     session_id: String,
     source: AgentModelSource,
+    allow_game_object_rename: bool,
 ) -> Result<CreatedAgent, String> {
     let host = Arc::clone(&window.state::<UnityQueries>().agent);
     let owner = window.label().to_owned();
@@ -405,12 +454,26 @@ async fn create_unity_with_model<R: Runtime>(
     } = source
         .resolve(window.app_handle().clone(), error_code)
         .await?;
+    let mut registry = tools.tool_registry().map_err(error_code)?;
+    let instructions = if allow_game_object_rename {
+        registry = register_selected_name(
+            registry,
+            tools.clone(),
+            Arc::clone(&host.name_writes),
+            owner.clone(),
+            agent_id.clone(),
+        )
+        .map_err(error_code)?;
+        "Assist with the selected Unity editor. Use the rename tool to request approval for changing the single selected GameObject name. Report the outcome based on its receipt. The tool never saves the scene."
+    } else {
+        "You are a read-only assistant for the selected Unity editor. Use only the supplied read-only tools. Do not claim to change the project."
+    };
     let session = AgentSession::new_with_system_prompt(
         provider,
-        tools.tool_registry().map_err(error_code)?,
+        registry,
         tools.validator(),
         6,
-        "You are a read-only assistant for the selected Unity editor. Use only the supplied read-only tools. Do not claim to change the project.",
+        instructions,
     )
     .map_err(error_code)?;
     let mut state = lock(&host.state);
@@ -586,6 +649,14 @@ pub(crate) fn poll_unity_agent<R: Runtime>(
         Some(Ok(())) => "completed",
         Some(Err(_)) => "failed",
         None if run.cancelled => "cancelling",
+        None if !queries
+            .agent
+            .name_writes
+            .approvals(window.label(), &agent_id)
+            .is_empty() =>
+        {
+            "awaiting_approval"
+        }
         None => "running",
     };
     let error = if retired {
@@ -652,4 +723,36 @@ pub(crate) fn close_unity_agent<R: Runtime>(
         state.agents.remove(&agent_id);
     }
     Ok(())
+}
+
+#[derive(Serialize)]
+pub(crate) struct UnityNameActivity {
+    approvals: Vec<Proposal>,
+    receipts: Vec<Receipt>,
+}
+
+#[tauri::command]
+pub(crate) fn list_unity_name_activity<R: Runtime>(
+    window: tauri::WebviewWindow<R>,
+    agent_id: String,
+    queries: tauri::State<'_, UnityQueries>,
+) -> Result<UnityNameActivity, &'static str> {
+    let host = &queries.agent;
+    Ok(UnityNameActivity {
+        approvals: host.name_writes.approvals(window.label(), &agent_id),
+        receipts: host.name_writes.receipts(window.label(), &agent_id),
+    })
+}
+
+#[tauri::command]
+pub(crate) fn answer_unity_name_approval<R: Runtime>(
+    window: tauri::WebviewWindow<R>,
+    approval_id: String,
+    approved: bool,
+    queries: tauri::State<'_, UnityQueries>,
+) -> Result<(), &'static str> {
+    queries
+        .agent
+        .name_writes
+        .answer(window.label(), &approval_id, approved)
 }

@@ -1021,3 +1021,145 @@ fn pending_unity_query_does_not_block_unreal_listener_lifecycle() {
         .contains("fixture complete"));
     server.join().unwrap();
 }
+
+#[test]
+#[ignore = "requires the disposable Unity rename fixture and dedicated Coplay bridge port"]
+fn unity_agent_approves_rename_in_a_real_disposable_editor() {
+    let project = std::path::PathBuf::from(std::env::var_os("UEBOX_TEST_UNITY_PROJECT").unwrap())
+        .canonicalize()
+        .unwrap();
+    let temporary = project.starts_with(std::env::temp_dir().canonicalize().unwrap());
+    #[cfg(unix)]
+    let temporary = temporary
+        || std::path::Path::new("/tmp")
+            .canonicalize()
+            .is_ok_and(|root| project.starts_with(root));
+    assert!(temporary);
+    let fixture_scene = project.join("Assets/UEBoxRenameProbe.unity");
+    assert!(fixture_scene.is_file());
+    let original_archive = std::fs::read(&fixture_scene).unwrap();
+    let port: u16 = std::env::var("UEBOX_TEST_UNITY_PORT")
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert!(port > 0 && port != 6400);
+
+    let window = window();
+    use tauri::Manager;
+    let other = tauri::WebviewWindowBuilder::new(
+        window.app_handle(),
+        "approval-outsider",
+        Default::default(),
+    )
+    .build()
+    .unwrap();
+    let target = invoke_command(
+        &window,
+        "attach_unity_agent_target",
+        json!({"projectRoot":project,"port":port,"allowClientTakeover":true}),
+    )
+    .unwrap();
+    let model = listener();
+    let agent = invoke_command(
+        &window,
+        "create_unity_agent",
+        json!({"sessionId":target["sessionId"],
+            "endpoint":format!("http://{}/v1/chat/completions", model.local_addr().unwrap()),
+            "model":"fixture","credential":null,"allowGameObjectRename":true}),
+    )
+    .unwrap();
+    let provider = thread::spawn(move || {
+        let mut stream = accept(&model);
+        let (_, request) = unity_agent_model_request(&mut stream);
+        let tools = request["tools"].as_array().unwrap();
+        assert!(tools
+            .iter()
+            .any(|tool| tool["function"]["name"] == "unity_rename_selected_game_object"));
+        unity_agent_model_reply(
+            &mut stream,
+            json!({"tool_calls":[
+                {"index":0,"id":"name","type":"function","function":{
+                    "name":"unity_rename_selected_game_object",
+                    "arguments":r#"{"name":"Approved Fixture Target"}"#
+                }}
+            ]}),
+            "tool_calls",
+        );
+        let mut stream = accept(&model);
+        let (_, request) = unity_agent_model_request(&mut stream);
+        let receipt = request["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|message| message["role"] == "tool")
+            .expect("The approved editor result reaches the model");
+        assert!(receipt["content"]
+            .as_str()
+            .unwrap()
+            .contains("Approved Fixture Target"));
+        unity_agent_model_reply(
+            &mut stream,
+            json!({"content":"Editor read-back confirmed"}),
+            "stop",
+        );
+    });
+
+    let run = invoke_command(
+        &window,
+        "start_unity_agent",
+        json!({"agentId":agent["agentId"],"text":"Rename the selected fixture object"}),
+    )
+    .unwrap();
+    let activity_args = json!({"agentId":agent["agentId"]});
+    let approval_id = {
+        let deadline = Instant::now() + Duration::from_secs(4);
+        loop {
+            let response =
+                invoke_command(&window, "list_unity_name_activity", activity_args.clone()).unwrap();
+            if let Some(approval) = response["approvals"].as_array().unwrap().first() {
+                assert_eq!(approval["oldName"], "Original Fixture Target");
+                assert_eq!(approval["newName"], "Approved Fixture Target");
+                break approval["approvalId"].clone();
+            }
+            assert!(
+                Instant::now() < deadline,
+                "No approval arrived from the real editor"
+            );
+            thread::sleep(Duration::from_millis(40));
+        }
+    };
+    assert_eq!(
+        invoke_command(&window, "poll_unity_agent", run.clone()).unwrap()["phase"],
+        "awaiting_approval"
+    );
+    assert!(
+        invoke_command(&other, "list_unity_name_activity", activity_args.clone()).unwrap()
+            ["approvals"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    let answer = json!({"approvalId":approval_id,"approved":true});
+    assert_eq!(
+        invoke_command(&other, "answer_unity_name_approval", answer.clone()),
+        Err(json!("approval_unavailable"))
+    );
+    invoke_command(&window, "answer_unity_name_approval", answer.clone()).unwrap();
+    assert_eq!(
+        invoke_command(&window, "answer_unity_name_approval", answer),
+        Err(json!("approval_unavailable"))
+    );
+    assert_eq!(
+        unity_agent_poll_until(&window, &run, "completed"),
+        "Editor read-back confirmed"
+    );
+    let activity = invoke_command(&window, "list_unity_name_activity", activity_args).unwrap();
+    assert_eq!(activity["receipts"][0]["status"], "applied");
+    assert_eq!(
+        activity["receipts"][0]["actualName"],
+        "Approved Fixture Target"
+    );
+    assert_eq!(std::fs::read(fixture_scene).unwrap(), original_archive);
+    invoke_command(&window, "release_unity_agent_target", target).unwrap();
+    provider.join().unwrap();
+}

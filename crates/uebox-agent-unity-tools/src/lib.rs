@@ -14,7 +14,7 @@ use uebox_agent_core::{
 use uebox_engine_core::{
     ConnectionToken, EditorSelection, EngineKind, EngineRegistry, ProjectIdentity,
 };
-use uebox_engine_unity::UnityClient;
+use uebox_engine_unity::{GameObjectNameOutcome, PreparedGameObjectName, UnityClient};
 
 type Validator = dyn Fn(&RunTarget) -> bool + Send + Sync;
 type Claims = Mutex<HashSet<u64>>;
@@ -180,6 +180,80 @@ impl UnityTools {
     /// Terminal state is monotonic; a live socket still needs a successful probe or read.
     pub fn is_retired(&self) -> bool {
         !self.inner.usable.load(Ordering::Acquire)
+    }
+
+    /// Prepare the exact selected GameObject through the held socket.
+    pub async fn prepare_game_object_name(
+        &self,
+        target: &RunTarget,
+        name: String,
+    ) -> Result<PreparedGameObjectName, ToolError> {
+        let binding = Arc::clone(&self.inner);
+        let mut slot = binding
+            .client
+            .clone()
+            .try_lock_owned()
+            .map_err(|_| ToolError)?;
+        let target = target.clone();
+        tokio::task::spawn_blocking(move || {
+            if !binding.current_on_worker(&target) {
+                return Err(ToolError);
+            }
+            let owned = slot.as_mut().ok_or(ToolError)?;
+            let prepared = owned
+                .client
+                .prepare_selected_game_object_name(&name)
+                .map_err(|_| ToolError)?;
+            if binding.current_on_worker(&target) {
+                Ok(prepared)
+            } else {
+                Err(ToolError)
+            }
+        })
+        .await
+        .map_err(|_| ToolError)?
+    }
+
+    /// Apply on the originally bound client. The socket guard remains live if
+    /// the calling assistant stops waiting during this blocking operation.
+    pub async fn apply_game_object_name(
+        &self,
+        target: &RunTarget,
+        prepared: PreparedGameObjectName,
+    ) -> GameObjectNameOutcome {
+        let binding = Arc::clone(&self.inner);
+        let Ok(mut slot) = binding.client.clone().try_lock_owned() else {
+            return GameObjectNameOutcome::NotExecuted {
+                reason: "target_busy",
+            };
+        };
+        let target = target.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            if !binding.current_on_worker(&target) {
+                return GameObjectNameOutcome::NotExecuted {
+                    reason: "target_changed",
+                };
+            }
+            let Some(owned) = slot.as_mut() else {
+                return GameObjectNameOutcome::NotExecuted {
+                    reason: "bridge_unavailable",
+                };
+            };
+            let result = owned.client.apply_selected_game_object_name(prepared);
+            if result == GameObjectNameOutcome::Unknown {
+                binding.retire();
+                slot.take();
+            }
+            result
+        })
+        .await;
+        match result {
+            Ok(outcome) => outcome,
+            Err(_) => {
+                self.close().await;
+                GameObjectNameOutcome::Unknown
+            }
+        }
     }
 
     /// Probe this socket without queueing behind a blocking read or opening another connection.

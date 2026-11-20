@@ -1,4 +1,4 @@
-//! Read-only, in-process client for the Coplay Unity editor's TCP bridge.
+//! In-process client for the Coplay Unity editor's TCP bridge.
 //!
 //! An explicit loopback endpoint and expected project root are required. The editor
 //! bridge accepts one client: connecting can disconnect a previous client. The
@@ -13,11 +13,15 @@
 //! }
 //! ```
 
+mod rename;
+pub use rename::{GameObjectNameOutcome, PreparedGameObjectName};
+
 use serde_json::{json, Value};
 use std::fmt;
 use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::path::{Component, Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 const WELCOME: &[u8] = b"WELCOME UNITY-MCP 1 FRAMING=1\n";
@@ -187,7 +191,10 @@ pub struct ActiveScene {
 
 /// One project-checked connection. Coplay cannot prove a process identity, even
 /// across two connections to the same endpoint and project.
+static CONNECTION_SEQUENCE: AtomicU64 = AtomicU64::new(1);
+
 pub struct UnityClient {
+    connection_id: u64,
     target: Target,
     canonical_project_root: PathBuf,
     options: BridgeOptions,
@@ -237,6 +244,7 @@ impl UnityClient {
         read_welcome(&mut stream, options.io_timeout)?;
         let identity = query_project(&mut stream, &target, &project_root, options)?;
         Ok(Self {
+            connection_id: CONNECTION_SEQUENCE.fetch_add(1, Ordering::Relaxed),
             target,
             canonical_project_root: project_root,
             options,

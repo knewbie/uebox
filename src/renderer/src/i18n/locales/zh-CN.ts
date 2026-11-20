@@ -527,6 +527,22 @@ export default {
       error: 'Unreal 操作失败'
     },
     unity: {
+      nameWrite: {
+        optIn: '允许助手申请重命名选中的 GameObject',
+        connect: '连接可申请重命名的助手',
+        title: 'GameObject 重命名审批',
+        change: '将「{oldName}」重命名为「{newName}」？',
+        identity: '场景 {sceneHandle}，对象 {gameObjectInstanceId}。操作后场景需手动保存。',
+        approve: '批准重命名',
+        decline: '拒绝',
+        expired: '此审批已无法使用。',
+        status: {
+          applied: '编辑器已确认重命名为「{name}」。',
+          mismatch: '编辑器读回的名称为「{name}」。',
+          not_executed: '未执行重命名。',
+          unknown: '无法确认最终名称，请先在 Unity 编辑器核对。'
+        }
+      },
       title: 'Unity 只读查询',
       intro: '主动连接指定的本地 Unity MCP 端口，读取项目与当前活动场景。不会自动发现或重连。',
       warning: '连接可能影响现有客户端',
