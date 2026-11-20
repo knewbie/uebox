@@ -15,7 +15,9 @@ async fn main() -> ExitCode {
     let cwd = std::env::current_dir().unwrap_or_default();
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     let connector = uebox_cli::unix::UnixConnector;
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    #[cfg(windows)]
+    let connector = uebox_cli::windows::WindowsConnector;
+    #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
     let connector = uebox_cli::UnavailableConnector;
     let result = run(&argv, &cwd, &connector).await;
     let _ = io::stderr().lock().write_all(result.stderr.as_bytes());

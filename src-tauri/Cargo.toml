@@ -52,7 +52,7 @@ tempfile = "3"
 tokio = { version = "1", features = ["rt", "time", "sync"], optional = true }
 tauri-plugin-opener = "2"
 
-[target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
+[target.'cfg(any(target_os = "macos", target_os = "linux", windows))'.dependencies]
 uebox-cli = { path = "../crates/uebox-cli", optional = true }
 
 [dev-dependencies]

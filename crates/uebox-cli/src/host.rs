@@ -51,7 +51,7 @@ impl Dispatch {
         self.0.load(Ordering::Acquire)
     }
 
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[cfg(any(target_os = "macos", target_os = "linux", windows))]
     pub(crate) fn confirm_not_dispatched(&self) {
         self.0.store(false, Ordering::Release);
     }

@@ -11,7 +11,7 @@ mod host;
 mod legacy_history;
 mod mcp;
 #[cfg(all(
-    any(target_os = "macos", target_os = "linux"),
+    any(target_os = "macos", target_os = "linux", windows),
     any(feature = "unreal", feature = "unity", feature = "godot")
 ))]
 mod native_cli;
@@ -85,7 +85,7 @@ pub fn configure_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> taur
             }
         });
     #[cfg(all(
-        any(target_os = "macos", target_os = "linux"),
+        any(target_os = "macos", target_os = "linux", windows),
         any(feature = "unreal", feature = "unity", feature = "godot")
     ))]
     let builder = builder.manage(native_cli::NativeCli::default());
@@ -107,17 +107,17 @@ pub fn configure_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> taur
             screen_recording::stop_screen_recording,
             screen_recording::reveal_screen_recording,
             #[cfg(all(
-                any(target_os = "macos", target_os = "linux"),
+                any(target_os = "macos", target_os = "linux", windows),
                 any(feature = "unreal", feature = "unity", feature = "godot")
             ))]
             native_cli::native_cli_endpoint,
             #[cfg(all(
-                any(target_os = "macos", target_os = "linux"),
+                any(target_os = "macos", target_os = "linux", windows),
                 any(feature = "unreal", feature = "unity", feature = "godot")
             ))]
             native_cli::start_native_cli,
             #[cfg(all(
-                any(target_os = "macos", target_os = "linux"),
+                any(target_os = "macos", target_os = "linux", windows),
                 any(feature = "unreal", feature = "unity", feature = "godot")
             ))]
             native_cli::stop_native_cli,
@@ -274,7 +274,7 @@ pub fn run() {
             desktop::reveal(_handle);
         }
         #[cfg(all(
-            any(target_os = "macos", target_os = "linux"),
+            any(target_os = "macos", target_os = "linux", windows),
             any(feature = "unreal", feature = "unity", feature = "godot")
         ))]
         if matches!(_event, tauri::RunEvent::Exit) {

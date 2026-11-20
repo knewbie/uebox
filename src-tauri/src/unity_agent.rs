@@ -1,5 +1,5 @@
 //! One explicitly authorized socket per Unity target. Agent runs never reconnect.
-#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[cfg(any(target_os = "macos", target_os = "linux", windows))]
 #[path = "native_cli/unity_targets.rs"]
 mod native_cli_targets;
 

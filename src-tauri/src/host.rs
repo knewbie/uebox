@@ -66,7 +66,7 @@ pub fn read_host_status() -> HostStatus {
             id,
             available: (id == "nativeCli"
                 && cfg!(all(
-                    any(target_os = "macos", target_os = "linux"),
+                    any(target_os = "macos", target_os = "linux", windows),
                     any(feature = "unity", feature = "unreal", feature = "godot")
                 )))
                 || matches!(id, "desktopPreferences" | "mcpInspection")

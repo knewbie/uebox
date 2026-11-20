@@ -1,33 +1,47 @@
-//! Optional native console endpoint. The socket lives in the running Tauri process.
-use std::{path::PathBuf, sync::Arc};
+//! Optional native console endpoint inside the running Tauri process.
+#[cfg(unix)]
+use std::path::PathBuf;
+use std::sync::Arc;
 
 use serde::Serialize;
 use tauri::{AppHandle, Manager, Runtime};
 use tokio::sync::oneshot;
 use uebox_cli::{
-    unix::{UnixServer, ENDPOINT_DIRECTORY},
     Capabilities, Dispatch, HostError, HostFuture, HostSession, OnlineProject, ReadTool, ToolReply,
     CLI_CONTRACT_VERSION,
 };
 
+#[cfg(unix)]
 use crate::profile_storage::{private_directory, ProfileError};
+#[cfg(unix)]
+use uebox_cli::unix::{UnixServer, ENDPOINT_DIRECTORY};
+#[cfg(windows)]
+use uebox_cli::{
+    windows::{WindowsConnector, WindowsServer},
+    Connector,
+};
+
+#[cfg(unix)]
+type EndpointAddress = PathBuf;
+#[cfg(windows)]
+type EndpointAddress = String;
 
 #[derive(Default)]
 pub(crate) struct NativeCli {
     service: tauri::async_runtime::Mutex<Option<Running>>,
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     test_profile: std::sync::OnceLock<PathBuf>,
 }
 
 struct Running {
-    endpoint: PathBuf,
+    endpoint: EndpointAddress,
     stop: oneshot::Sender<()>,
     task: tauri::async_runtime::JoinHandle<Result<(), HostError>>,
 }
 
 #[derive(Serialize)]
 pub(crate) struct Endpoint {
-    endpoint: PathBuf,
+    endpoint: EndpointAddress,
 }
 
 fn endpoint_error(error: HostError) -> &'static str {
@@ -38,6 +52,7 @@ fn endpoint_error(error: HostError) -> &'static str {
     }
 }
 
+#[cfg(unix)]
 fn profile_root<R: Runtime>(
     app: &AppHandle<R>,
     _host: &NativeCli,
@@ -65,19 +80,31 @@ pub(crate) async fn start_native_cli<R: Runtime>(
         }
         *stored = None;
     }
-    let root = profile_root(&app, &host)?;
-    let directory = tauri::async_runtime::spawn_blocking(move || {
-        private_directory(&root, ENDPOINT_DIRECTORY, true)
-            .map_err(|error| match error {
-                ProfileError::Invalid => "native_cli_endpoint_invalid",
-                _ => "native_cli_unavailable",
-            })?
-            .ok_or("native_cli_unavailable")
-    })
-    .await
-    .map_err(|_| "native_cli_unavailable")??;
-    let endpoint = directory.clone();
-    let socket = UnixServer::bind(&directory).map_err(endpoint_error)?;
+    #[cfg(unix)]
+    let (socket, endpoint) = {
+        let root = profile_root(&app, &host)?;
+        let directory = tauri::async_runtime::spawn_blocking(move || {
+            private_directory(&root, ENDPOINT_DIRECTORY, true)
+                .map_err(|error| match error {
+                    ProfileError::Invalid => "native_cli_endpoint_invalid",
+                    _ => "native_cli_unavailable",
+                })?
+                .ok_or("native_cli_unavailable")
+        })
+        .await
+        .map_err(|_| "native_cli_unavailable")??;
+        (
+            UnixServer::bind(&directory).map_err(endpoint_error)?,
+            directory,
+        )
+    };
+    #[cfg(windows)]
+    let (socket, endpoint) = {
+        let name = WindowsConnector
+            .default_endpoint()
+            .ok_or("native_cli_endpoint_invalid")?;
+        (WindowsServer::bind(&name).map_err(endpoint_error)?, name)
+    };
     let (stop, shutdown) = oneshot::channel();
     let console = Arc::new(Console { app: app.clone() });
     let task = tauri::async_runtime::spawn(socket.serve(console, async {
@@ -229,7 +256,7 @@ impl<R: Runtime> HostSession for Console<R> {
     }
 }
 
-#[cfg(all(test, feature = "unreal"))]
+#[cfg(all(test, feature = "unreal", unix))]
 mod tests {
     use futures_util::{SinkExt, StreamExt};
     use serde_json::{json, Value};

@@ -220,15 +220,15 @@ current collection records intact.
 
 ### Native CLI / 原生 CLI
 
-On macOS and Linux builds, use **Native CLI → Start CLI endpoint** to start
-the in-process read-only server. Build the console binary and use the directory
-displayed in the app. The server authenticates the local system user, accepts
-the five compiled editor read operations, and only queries connected targets.
-The console can show help and its version while the app is closed.
+Use **Native CLI → Start CLI endpoint** to start the in-process read-only
+server. macOS and Linux use a Unix socket. Windows uses a local named pipe.
+The server authenticates the local system user, accepts the compiled editor
+read operations and only queries connected targets. The console can show help
+and its version while the app is closed.
 
-在 macOS 与 Linux 构建中，从「原生 CLI」启动进程内只读入口，使用界面显示的目录。
-服务器校验本机用户身份，按编译选项公开五种固定读取操作，并只查询已经连接的编辑器。
-控制台默认从当前用户的 Tauri 数据目录发现端点，也可以传入 `--endpoint` 指定窗口显示的目录。
+在 macOS、Linux 和 Windows 构建中，从「原生 CLI」启动进程内只读入口。macOS 与 Linux
+使用 Unix 套接字，Windows 使用本机命名管道。控制台默认发现当前用户的入口，也可传入
+`--endpoint` 指定窗口显示的地址。服务器校验本机用户身份，只查询已经连接的编辑器。
 应用未启动时，控制台仍可显示帮助与版本。
 
 ```sh

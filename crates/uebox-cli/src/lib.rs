@@ -400,3 +400,6 @@ fn empty_object(bytes: &[u8]) -> Result<(), Fault> {
         _ => Err(Fault::InvalidArgument),
     }
 }
+
+#[cfg(windows)]
+pub mod windows;

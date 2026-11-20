@@ -1,5 +1,5 @@
 //! Fixed-target, read-only Godot Agent preview. Nothing here discovers editors.
-#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[cfg(any(target_os = "macos", target_os = "linux", windows))]
 #[path = "native_cli/godot_targets.rs"]
 mod native_cli_targets;
 
