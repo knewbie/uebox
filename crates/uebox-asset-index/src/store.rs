@@ -42,6 +42,11 @@ CREATE TABLE assets (
 ) STRICT, WITHOUT ROWID;
 CREATE INDEX assets_listing ON assets(vault, folder, identity);";
 
+pub struct AssetLocation {
+    pub root: String,
+    pub relative: String,
+}
+
 pub struct AssetIndex(Connection);
 
 #[derive(Serialize)]
@@ -184,6 +189,27 @@ impl AssetIndex {
             folders: folders.len(),
             retained_index,
         })
+    }
+
+    pub fn location(&self, vault: &str, asset: &str) -> Result<Option<AssetLocation>, Error> {
+        if !identity(vault) || !identity(asset) {
+            return Err(Error::Invalid);
+        }
+        self.0
+            .query_row(
+                "SELECT vaults.root_path, assets.relative_path
+             FROM assets JOIN vaults ON vaults.identity = assets.vault
+             WHERE assets.vault = ?1 AND assets.identity = ?2 AND assets.relative_path IS NOT NULL",
+                params![vault, asset],
+                |row| {
+                    Ok(AssetLocation {
+                        root: row.get(0)?,
+                        relative: row.get(1)?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(Into::into)
     }
 
     pub fn vaults(&self, after: Option<&str>, limit: u32) -> Result<Vec<Vault>, Error> {

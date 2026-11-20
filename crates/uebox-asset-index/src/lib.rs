@@ -4,7 +4,7 @@ mod manifest;
 mod store;
 
 pub use manifest::{Archive, Asset, Folder, Vault};
-pub use store::{AssetIndex, ImportReport};
+pub use store::{AssetIndex, AssetLocation, ImportReport};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Error {

@@ -322,6 +322,7 @@ export default {
       approveDelete: 'Confirm deletion'
     },
     assetIndex: {
+      revealOriginal: 'Show original in file manager',
       title: 'Local asset index',
       intro:
         'Browse and search asset metadata imported from the desktop version. Paths refer to the original locations.',
@@ -353,6 +354,9 @@ export default {
       exportExists: 'A file with that name exists. Choose a new filename.',
       exportFailed: 'Unable to export this asset index.',
       errors: {
+        asset_original_offline: 'The original file or its library is offline.',
+        asset_original_outside: 'The original location is outside this library.',
+        asset_original_unavailable: 'Unable to show this asset in the file manager.',
         generic: 'Unable to import this index. Choose an archive exported from UEBox.',
         asset_index_conflict:
           'The archive has a different root for a library with existing indexed assets. Export from the correct library while its index is available.',

@@ -99,6 +99,7 @@ pub fn configure_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> taur
             asset_index::list_asset_vaults,
             asset_index::list_asset_folders,
             asset_index::list_asset_items,
+            asset_index::reveal_asset_original,
             desktop::set_desktop_tray,
             #[cfg(all(
                 any(target_os = "macos", target_os = "linux"),

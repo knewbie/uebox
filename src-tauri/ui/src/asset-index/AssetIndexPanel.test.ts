@@ -58,6 +58,15 @@ it('keeps identically named libraries separate and searches only the selected in
         search: 'hero'
       }
     ])
+    ipc.mockRejectedValueOnce('asset_original_offline')
+    await wrapper.get('[data-reveal-asset]').trigger('click')
+    await flushPromises()
+    expect(ipc.mock.calls.at(-1)).toEqual([
+      'reveal_asset_original',
+      { vaultId: 'b', assetId: candidate.identity }
+    ])
+    expect(wrapper.text()).toContain('The original file or its library is offline.')
+    expect(wrapper.text()).toContain(candidate.name)
   } finally {
     wrapper.unmount()
   }

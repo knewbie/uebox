@@ -312,6 +312,7 @@ export default {
       approveDelete: '确认删除'
     },
     assetIndex: {
+      revealOriginal: '在文件管理器中显示原件',
       title: '本机资产索引',
       intro: '浏览和搜索从桌面版导入的资产元数据，路径仍指向原有位置。',
       selectArchive: '选择资产索引归档',
@@ -341,6 +342,9 @@ export default {
       exportExists: '目标文件已存在，请选择新的文件名。',
       exportFailed: '无法导出此资产索引。',
       errors: {
+        asset_original_offline: '原件或其资产库当前离线。',
+        asset_original_outside: '原件位置超出此资产库。',
+        asset_original_unavailable: '无法在文件管理器中显示此资产。',
         generic: '无法导入此索引，请选择从虚幻盒子导出的归档。',
         asset_index_conflict:
           '归档的根目录与已有索引的资产库不同，请在对应资产库的索引可用时重新导出。',

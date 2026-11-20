@@ -1,6 +1,9 @@
 //! Offline asset-index archives stored independently of engine projects and original files.
+use std::path::{Component, Path, PathBuf};
+
 use serde::Serialize;
 use tauri::{AppHandle, Manager, Runtime};
+use tauri_plugin_opener::OpenerExt;
 use uebox_asset_index::{Archive, Asset, AssetIndex, Error, Folder, ImportReport, Vault};
 
 use crate::profile_storage::{acquire_lock, checked_file_exists, private_directory, ProfileError};
@@ -175,4 +178,94 @@ pub(crate) async fn list_asset_items<R: Runtime>(
         Ok(page(result, limit as usize, |asset| &asset.identity))
     })
     .await
+}
+
+fn resolve_original(root: &Path, relative: &Path) -> Result<PathBuf, &'static str> {
+    const OUTSIDE: &str = "asset_original_outside";
+    const MISSING: &str = "asset_original_offline";
+    if !root.is_absolute()
+        || relative.as_os_str().is_empty()
+        || !relative
+            .components()
+            .all(|part| matches!(part, Component::Normal(_)))
+    {
+        return Err(OUTSIDE);
+    }
+    #[cfg(windows)]
+    {
+        use std::path::Prefix;
+        if !matches!(root.components().next(), Some(Component::Prefix(prefix))
+            if matches!(prefix.kind(), Prefix::Disk(_) | Prefix::VerbatimDisk(_)))
+        {
+            return Err(OUTSIDE);
+        }
+    }
+    let root = root.canonicalize().map_err(|_| MISSING)?;
+    let original = root.join(relative).canonicalize().map_err(|_| MISSING)?;
+    if !original.starts_with(&root) {
+        return Err(OUTSIDE);
+    }
+    if !original.is_file() {
+        return Err(MISSING);
+    }
+    Ok(original)
+}
+
+#[tauri::command]
+pub(crate) async fn reveal_asset_original<R: Runtime>(
+    app: AppHandle<R>,
+    vault_id: String,
+    asset_id: String,
+) -> Result<(), &'static str> {
+    let location = with_index(app.clone(), false, move |index| {
+        index
+            .ok_or("asset_original_offline")?
+            .location(&vault_id, &asset_id)
+            .map_err(index_error)?
+            .ok_or("asset_original_offline")
+    })
+    .await?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let original = resolve_original(Path::new(&location.root), Path::new(&location.relative))?;
+        app.opener()
+            .reveal_item_in_dir(original)
+            .map_err(|_| "asset_original_unavailable")
+    })
+    .await
+    .map_err(|_| "asset_original_unavailable")?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn originals_are_scoped_to_files_inside_the_registered_library() {
+        let fixture = tempfile::tempdir().unwrap();
+        let library = fixture.path().join("existing");
+        std::fs::create_dir(&library).unwrap();
+        std::fs::write(library.join("asset.bin"), b"fixture").unwrap();
+        let outside = fixture.path().join("outside.bin");
+        std::fs::write(&outside, b"not in this library").unwrap();
+        assert_eq!(
+            resolve_original(&library, Path::new("asset.bin")).unwrap(),
+            library.join("asset.bin").canonicalize().unwrap()
+        );
+        assert_eq!(
+            resolve_original(&library, Path::new("../outside.bin")).unwrap_err(),
+            "asset_original_outside"
+        );
+        assert_eq!(
+            resolve_original(&library, Path::new("absent.bin")).unwrap_err(),
+            "asset_original_offline"
+        );
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&outside, library.join("link")).unwrap();
+            assert_eq!(
+                resolve_original(&library, Path::new("link")).unwrap_err(),
+                "asset_original_outside"
+            );
+        }
+    }
 }

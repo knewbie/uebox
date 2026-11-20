@@ -35,6 +35,28 @@ const importing = ref(false)
 const transferError = ref<string | null>(null)
 let directoryRequest = 0
 
+const openingOriginal = ref<string | null>(null)
+const originalError = ref<string | null>(null)
+
+async function revealOriginal(asset: Asset): Promise<void> {
+  const library = selected.value
+  if (!library || !asset.relativePath || openingOriginal.value !== null) return
+  openingOriginal.value = asset.identity
+  originalError.value = null
+  try {
+    await invoke('reveal_asset_original', { vaultId: library.identity, assetId: asset.identity })
+  } catch (cause) {
+    if (selection.value === library.identity) {
+      originalError.value =
+        cause === 'asset_original_offline' || cause === 'asset_original_outside'
+          ? cause
+          : 'asset_original_unavailable'
+    }
+  } finally {
+    openingOriginal.value = null
+  }
+}
+
 const transferErrors = new Set([
   'asset_index_conflict',
   'asset_index_limit',
@@ -151,6 +173,7 @@ function resetDirectory(): Promise<void> {
 
 function openVault(id: string | null): Promise<void> {
   selection.value = id
+  originalError.value = null
   path.value = []
   searchText.value = ''
   search.value = null
@@ -276,11 +299,25 @@ onMounted(() => readVaults())
         <p v-if="!loading && !listError && !assets.length && !folders.length">
           {{ t('tauriPreview.assetIndex.empty') }}
         </p>
+        <AppAlert
+          v-if="originalError"
+          type="error"
+          :message="t(`tauriPreview.assetIndex.errors.${originalError}`)"
+        />
         <ul v-if="assets.length" class="assets-list">
           <li v-for="asset in assets" :key="asset.identity">
             <strong>{{ asset.name }}</strong>
             <code v-if="asset.relativePath">{{ asset.relativePath }}</code>
             <span v-if="asset.tags.length">{{ asset.tags.join(' · ') }}</span>
+            <AppButton
+              v-if="asset.relativePath"
+              data-reveal-asset
+              variant="text"
+              size="small"
+              :disabled="openingOriginal !== null"
+              @click="revealOriginal(asset)"
+              >{{ t('tauriPreview.assetIndex.revealOriginal') }}</AppButton
+            >
           </li>
         </ul>
         <AppButton v-if="assetsNext" :disabled="loading" @click="readDirectory('assets')">{{
