@@ -361,6 +361,19 @@ export default {
       inspecting: '正在检查…',
       result: 'MCP {version} · 共 {count} 个工具 · 显示 {shown} 个',
       cleanup: '服务器未确认已结束本次连接。',
+      saved: {
+        toggle: '已保存的端点',
+        name: '端点名称',
+        bearer: '访问令牌（选填）',
+        save: '保存端点',
+        empty: '暂无已保存的端点。',
+        authorized: '使用已保存的访问令牌',
+        remove: '移除端点',
+        confirm: '从应用中移除「{name}」及其访问令牌？',
+        cancel: '取消',
+        refresh: '刷新已保存的端点',
+        cleanup: '端点已移除。系统凭据仍未删除。'
+      },
       errors: {
         mcp_invalid_endpoint: '请输入有效的 HTTPS 或本机 HTTP 地址。',
         mcp_timeout: '服务器响应超时。',
@@ -368,7 +381,15 @@ export default {
         mcp_authorization_required: '服务器要求授权。',
         mcp_version: '此 MCP 协议版本暂不支持。',
         mcp_no_tools: '此服务器未公布工具。',
-        mcp_unavailable: '无法检查此 MCP 端点。'
+        mcp_unavailable: '无法检查此 MCP 端点。',
+        mcp_busy: '另一项 MCP 操作正在运行。',
+        mcp_endpoint_missing: '此端点已移除。',
+        mcp_endpoint_duplicate: '此端点已经保存。',
+        mcp_catalog_invalid: '请检查端点名称和已保存的端点列表。',
+        mcp_catalog_unavailable: '无法打开已保存的端点。',
+        credential_unavailable: '已保存的令牌或系统凭据存储不可用。',
+        credential_access_denied: '系统拒绝读取已保存的令牌。',
+        credential_invalid_secret: '请输入有效的访问令牌。'
       }
     },
     desktop: {

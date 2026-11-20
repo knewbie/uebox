@@ -245,6 +245,16 @@ fetches its advertised tool names. It supports TLS and loopback HTTP, declines
 redirects, bounds responses and cleans up sessions when supported by the server.
 Endpoint credentials and tool execution are outside this inspection flow.
 
+Open **Saved endpoints** to save a name, URL, and optional pre-issued access
+token. Saving does not contact the server. Inspect a saved entry explicitly
+to fetch its tools. The token lives in the OS credential store and is bound
+to that entry's exact URL. Removing the entry disables future use immediately.
+OAuth discovery and consent are outside this workflow.
+
+展开「已保存的端点」，可保存名称、地址和已有访问令牌。保存时保持离线。主动检查
+某个登记后才连接服务器。令牌保存在系统凭据存储中，与该登记的完整地址绑定。移除
+登记后即停止使用。此流程适用于已经取得令牌的服务器。
+
 ### System tray / 系统托盘
 
 In Desktop preferences, enable the tray for the current application session.

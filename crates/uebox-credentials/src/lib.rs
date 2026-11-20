@@ -23,12 +23,14 @@ pub const APPLICATION_NAMESPACE: &str = "com.uebox.tauri-preview.credentials.v1"
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum CredentialPurpose {
     ModelBearer,
+    McpBearer,
 }
 
 impl CredentialPurpose {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::ModelBearer => "model-bearer",
+            Self::McpBearer => "mcp-bearer",
         }
     }
 }
@@ -39,6 +41,7 @@ impl FromStr for CredentialPurpose {
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
             "model-bearer" => Ok(Self::ModelBearer),
+            "mcp-bearer" => Ok(Self::McpBearer),
             _ => Err(CredentialError::InvalidReference),
         }
     }

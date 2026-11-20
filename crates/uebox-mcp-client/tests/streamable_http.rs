@@ -354,3 +354,63 @@ async fn expired_session_reinitializes_once_and_keeps_the_id_in_memory() {
     client.close().await.unwrap();
     server.await.unwrap();
 }
+
+#[tokio::test]
+async fn bearer_is_on_each_protocol_request_and_never_follows_a_redirect() {
+    let (listener, address) = bind_fixture().await;
+    let (other, other_addr) = bind_fixture().await;
+    let server = tokio::spawn(async move {
+        for operation in [
+            "initialize",
+            "notifications/initialized",
+            "tools/list",
+            "DELETE",
+        ] {
+            let (mut stream, request) = accept(&listener).await;
+            assert_eq!(
+                request.headers.get("authorization").map(String::as_str),
+                Some("Bearer fixture-private")
+            );
+            assert!(!request.body.to_string().contains("fixture-private"));
+            match operation {
+                "initialize" => {
+                    assert_eq!(request.body["method"], operation);
+                    respond(&mut stream, "200 OK", "application/json", &[("MCP-Session-Id", "fixture")], &json_reply(1, json!({
+                        "protocolVersion":LATEST_PROTOCOL_VERSION, "capabilities": {"tools": {}}, "serverInfo":{"name":"fixture","version":"1"}
+                    }))).await;
+                }
+                "notifications/initialized" => {
+                    assert_eq!(request.body["method"], operation);
+                    respond(&mut stream, "202 Accepted", "application/json", &[], b"").await;
+                }
+                "tools/list" => {
+                    assert_eq!(request.body["method"], operation);
+                    respond(
+                        &mut stream,
+                        "302 Found",
+                        "text/plain",
+                        &[("Location", &format!("http://{other_addr}/mcp"))],
+                        b"",
+                    )
+                    .await;
+                }
+                _ => {
+                    assert_eq!(request.method, operation);
+                    respond(&mut stream, "204 No Content", "text/plain", &[], b"").await;
+                }
+            }
+        }
+    });
+    let config = ClientConfig::new(format!("http://{address}/mcp"))
+        .with_bearer(b"fixture-private")
+        .unwrap();
+    let mut client = McpClient::connect(config).await.unwrap();
+    assert_eq!(require_error(client.list_tools().await), McpError::Redirect);
+    client.close().await.unwrap();
+    server.await.unwrap();
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(50), other.accept())
+            .await
+            .is_err()
+    );
+}

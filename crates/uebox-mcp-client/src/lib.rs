@@ -21,7 +21,8 @@ const MAX_TIMEOUT: Duration = Duration::from_secs(300);
 /// Explicit endpoint configuration. No ambient credentials or headers are read.
 #[derive(Clone)]
 pub struct ClientConfig {
-    pub endpoint: String,
+    endpoint: String,
+    authorization: Option<header::HeaderValue>,
     pub request_timeout: Duration,
 }
 
@@ -29,15 +30,40 @@ impl ClientConfig {
     pub fn new(endpoint: impl Into<String>) -> Self {
         Self {
             endpoint: endpoint.into(),
+            authorization: None,
             request_timeout: Duration::from_secs(30),
         }
     }
+
+    /// Attach a manually provisioned bearer to this exact endpoint for every protocol request.
+    /// This configuration never follows redirects or reads ambient authorization.
+    pub fn with_bearer(mut self, token: &[u8]) -> Result<Self, McpError> {
+        if token.is_empty()
+            || token.len() > 2560
+            || !token.iter().all(|byte| (0x21..=0x7e).contains(byte))
+        {
+            return Err(McpError::InvalidAuthorization);
+        }
+        let mut bytes = b"Bearer ".to_vec();
+        bytes.extend_from_slice(token);
+        let value = header::HeaderValue::from_maybe_shared(bytes);
+        let mut value = value.map_err(|_| McpError::InvalidAuthorization)?;
+        value.set_sensitive(true);
+        self.authorization = Some(value);
+        Ok(self)
+    }
+}
+
+/// Validate and store the exact URL used to send requests.
+pub fn canonical_endpoint(raw: &str) -> Result<String, McpError> {
+    validate_endpoint(raw).map(Into::into)
 }
 
 /// Stable errors omit endpoint values and server-provided error messages.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum McpError {
     InvalidEndpoint,
+    InvalidAuthorization,
     InvalidTimeout,
     Transport,
     Timeout,
@@ -63,6 +89,7 @@ impl fmt::Display for McpError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidEndpoint => f.write_str("invalid or disallowed MCP endpoint"),
+            Self::InvalidAuthorization => f.write_str("invalid MCP authorization"),
             Self::InvalidTimeout => f.write_str("invalid MCP request timeout"),
             Self::Transport => f.write_str("MCP transport failed"),
             Self::Timeout => f.write_str("MCP request timed out"),
@@ -123,8 +150,13 @@ impl McpClient {
             return Err(McpError::InvalidTimeout);
         }
         let endpoint = validate_endpoint(&config.endpoint)?;
+        let mut headers = header::HeaderMap::new();
+        if let Some(authorization) = config.authorization {
+            headers.insert(header::AUTHORIZATION, authorization);
+        }
         let http = Client::builder()
             .no_proxy()
+            .default_headers(headers)
             .resolve("localhost", std::net::SocketAddr::from(([127, 0, 0, 1], 0)))
             .redirect(Policy::none())
             .timeout(config.request_timeout)

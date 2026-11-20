@@ -374,6 +374,19 @@ export default {
       inspecting: 'Inspecting…',
       result: 'MCP {version} · {count} tools · showing {shown}',
       cleanup: 'The server did not confirm that it ended the connection.',
+      saved: {
+        toggle: 'Saved endpoints',
+        name: 'Endpoint name',
+        bearer: 'Access token (optional)',
+        save: 'Save endpoint',
+        empty: 'No saved endpoints.',
+        authorized: 'Uses a saved access token',
+        remove: 'Remove endpoint',
+        confirm: 'Remove “{name}” and its access token from this app?',
+        cancel: 'Cancel',
+        refresh: 'Refresh saved endpoints',
+        cleanup: 'The endpoint was removed. Its system credential could not be deleted.'
+      },
       errors: {
         mcp_invalid_endpoint: 'Enter a valid HTTPS or local HTTP endpoint.',
         mcp_timeout: 'The server did not respond in time.',
@@ -381,7 +394,15 @@ export default {
         mcp_authorization_required: 'The server requires authorization.',
         mcp_version: 'This MCP protocol version is unsupported.',
         mcp_no_tools: 'This server does not advertise tools.',
-        mcp_unavailable: 'Unable to inspect this MCP endpoint.'
+        mcp_unavailable: 'Unable to inspect this MCP endpoint.',
+        mcp_busy: 'Another MCP operation is in progress.',
+        mcp_endpoint_missing: 'This endpoint is no longer saved.',
+        mcp_endpoint_duplicate: 'This endpoint is already saved.',
+        mcp_catalog_invalid: 'Check the endpoint name and saved endpoint list.',
+        mcp_catalog_unavailable: 'Unable to open saved endpoints.',
+        credential_unavailable: 'The saved access token or system credential store is unavailable.',
+        credential_access_denied: 'The system did not allow access to the saved token.',
+        credential_invalid_secret: 'Enter a valid access token.'
       }
     },
     desktop: {

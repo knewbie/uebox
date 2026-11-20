@@ -4,6 +4,7 @@ import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppAlert from '@renderer/components/AppAlert.vue'
 import AppButton from '@renderer/components/AppButton.vue'
+import SavedEndpoints from './SavedEndpoints.vue'
 
 interface Inspection {
   protocolVersion: string
@@ -14,6 +15,7 @@ interface Inspection {
 
 const { t } = useI18n()
 const endpoint = ref('')
+const showSaved = ref(false)
 const inspecting = ref(false)
 const inspection = ref<Inspection | null>(null)
 const error = ref<string | null>(null)
@@ -23,17 +25,32 @@ const errors = new Set([
   'mcp_redirect',
   'mcp_authorization_required',
   'mcp_version',
-  'mcp_no_tools'
+  'mcp_no_tools',
+  'mcp_busy',
+  'mcp_endpoint_missing',
+  'mcp_catalog_invalid',
+  'mcp_catalog_unavailable',
+  'credential_unavailable',
+  'credential_access_denied',
+  'credential_invalid_secret'
 ])
 
-async function inspect(): Promise<void> {
+function inspect(): Promise<void> {
   const selected = endpoint.value.trim()
-  if (inspecting.value || !selected) return
+  return selected ? inspectTools('inspect_mcp_endpoint', { endpoint: selected }) : Promise.resolve()
+}
+
+function inspectSaved(endpointId: string): Promise<void> {
+  return inspectTools('inspect_saved_mcp_endpoint', { endpointId })
+}
+
+async function inspectTools(command: string, args: Record<string, string>): Promise<void> {
+  if (inspecting.value) return
   inspecting.value = true
   inspection.value = null
   error.value = null
   try {
-    inspection.value = await invoke<Inspection>('inspect_mcp_endpoint', { endpoint: selected })
+    inspection.value = await invoke<Inspection>(command, args)
   } catch (cause) {
     error.value = typeof cause === 'string' && errors.has(cause) ? cause : 'mcp_unavailable'
   } finally {
@@ -60,6 +77,10 @@ async function inspect(): Promise<void> {
         {{ t(inspecting ? 'tauriPreview.mcp.inspecting' : 'tauriPreview.mcp.inspect') }}
       </AppButton>
     </form>
+    <AppButton :aria-expanded="showSaved" data-mcp-saved @click="showSaved = !showSaved">
+      {{ t('tauriPreview.mcp.saved.toggle') }}
+    </AppButton>
+    <SavedEndpoints v-if="showSaved" :inspecting="inspecting" @inspect="inspectSaved" />
     <AppAlert v-if="error" type="error" :message="t(`tauriPreview.mcp.errors.${error}`)" />
     <template v-if="inspection">
       <p role="status">
