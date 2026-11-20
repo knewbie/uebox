@@ -37,3 +37,7 @@ export function removeRegisteredProject(id: string): Promise<boolean> {
 export function importRegisteredProjects(manifest: string): Promise<ProjectImportSummary> {
   return invoke<ProjectImportSummary>('import_registered_projects', { manifest })
 }
+
+export function openRegisteredProjectFolder(projectId: string): Promise<void> {
+  return invoke('open_registered_project_folder', { projectId })
+}

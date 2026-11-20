@@ -32,3 +32,25 @@ it('leaves the system tray off until the user enables it and retains the state a
     wrapper.unmount()
   }
 })
+
+it('opens a browser only after a URL is submitted and shows a stable error on a failed request', async () => {
+  const ipc = vi.mocked(invoke)
+  ipc.mockReset().mockResolvedValueOnce(false).mockRejectedValueOnce('browser_already_open')
+  const wrapper = mount(DesktopPanel, { global: { plugins: [createAppI18n('en-US')] } })
+  try {
+    await flushPromises()
+    await wrapper.get('#isolated-browser-url').setValue('https://fixture.example/page')
+    expect(ipc.mock.calls).toEqual([['desktop_tray']])
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(ipc.mock.calls[1]).toEqual([
+      'open_isolated_browser',
+      {
+        address: 'https://fixture.example/page'
+      }
+    ])
+    expect(wrapper.text()).toContain('Close the current browser window before opening a new one.')
+  } finally {
+    wrapper.unmount()
+  }
+})

@@ -252,6 +252,13 @@ Closing the main window then hides it. Use the tray menu to show the window or q
 Disabling the tray restores normal close behavior. On macOS, clicking the Dock
 icon also reopens the hidden window.
 
+### Browser window and project folders
+
+Desktop preferences can open an HTTPS address in a separate private window.
+Top-level navigation stays on the selected HTTPS origin. The window is isolated
+from the application commands and uses a separate browsing context.
+The project library opens a registered directory using its saved registration ID.
+
 ### Project registrations / 项目登记
 
 Choose an engine and enter a name and absolute project directory in the preview.

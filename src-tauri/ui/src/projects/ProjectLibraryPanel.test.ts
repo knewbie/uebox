@@ -195,3 +195,17 @@ it('keeps the row on a removal error and displays a generic message for unknown 
   expect(wrapper.text()).toContain('Unable to complete the project registration operation')
   expect(wrapper.text()).not.toContain('/tmp/private')
 })
+
+it('opens a registered folder by stable ID and keeps an offline registration visible', async () => {
+  ipc.mockResolvedValueOnce([existing]).mockRejectedValueOnce('project_offline')
+  const wrapper = openPanel()
+  await flushPromises()
+  await wrapper.get('[data-project-folder]').trigger('click')
+  await flushPromises()
+  expect(ipc.mock.calls).toEqual([
+    ['list_registered_projects'],
+    ['open_registered_project_folder', { projectId: existing.id }]
+  ])
+  expect(wrapper.text()).toContain('The registered project directory is offline.')
+  expect(wrapper.text()).toContain(existing.name)
+})

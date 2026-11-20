@@ -8,6 +8,7 @@ import ProjectCollectionsPanel from './collections/ProjectCollectionsPanel.vue'
 import {
   importRegisteredProjects,
   listRegisteredProjects,
+  openRegisteredProjectFolder,
   registerProject,
   removeRegisteredProject,
   type ProjectEngine,
@@ -22,7 +23,7 @@ const engine = ref<ProjectEngine | ''>('')
 const name = ref('')
 const path = ref('')
 const projects = ref<RegisteredProject[]>([])
-const pending = ref<'list' | 'register' | 'remove' | 'import' | null>(null)
+const pending = ref<'list' | 'register' | 'remove' | 'import' | 'open' | null>(null)
 const listError = ref<string | null>(null)
 const writeError = ref<string | null>(null)
 const importInput = ref<HTMLInputElement | null>(null)
@@ -39,6 +40,8 @@ const knownErrors = new Set([
   'project_library_recovery_required',
   'project_invalid',
   'project_missing',
+  'project_offline',
+  'project_folder_unavailable',
   'project_duplicate',
   'project_import_invalid',
   'project_import_version',
@@ -84,6 +87,10 @@ function addProject(): void {
     name.value = ''
     path.value = ''
   })
+}
+
+function openFolder(id: string): Promise<void> {
+  return perform('open', () => openRegisteredProjectFolder(id))
 }
 
 function removeProject(id: string): Promise<void> {
@@ -222,6 +229,14 @@ onMounted(refresh)
           <span>{{ t(`tauriPreview.projectLibrary.engines.${project.engine}`) }}</span>
           <code>{{ project.path }}</code>
         </div>
+        <AppButton
+          data-project-folder
+          :disabled="pending !== null"
+          :aria-label="t('tauriPreview.projectLibrary.openNamed', { name: project.name })"
+          @click="openFolder(project.id)"
+        >
+          {{ t('tauriPreview.projectLibrary.openFolder') }}
+        </AppButton>
         <AppButton
           data-project-remove
           :disabled="pending !== null"

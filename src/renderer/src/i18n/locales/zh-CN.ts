@@ -72,6 +72,8 @@ export default {
       engines: { unreal: '虚幻引擎', unity: 'Unity', godot: 'Godot' }
     },
     projectLibrary: {
+      openFolder: '打开目录',
+      openNamed: '打开「{name}」的目录',
       title: '项目登记',
       intro: '手动登记已有项目的目录。移除登记记录时会保留项目文件。',
       engine: '引擎',
@@ -95,6 +97,8 @@ export default {
       removeNamed: '移除「{name}」的登记记录',
       listError: '无法读取项目登记记录',
       errors: {
+        project_offline: '已登记的项目目录当前离线。',
+        project_folder_unavailable: '无法打开已登记的目录。',
         project_library_invalid: '项目登记文件无效，或使用了不支持的格式。',
         project_library_locked: '项目登记库正忙，请重试。',
         project_library_unavailable: '项目登记库当前不可用。',
@@ -364,6 +368,13 @@ export default {
       }
     },
     desktop: {
+      browserUrl: 'HTTPS 网页地址',
+      browserOpen: '打开浏览器窗口',
+      browserErrors: {
+        browser_invalid_url: '请输入有效的 HTTPS 地址。',
+        browser_already_open: '请先关闭当前浏览器窗口，再打开新窗口。',
+        browser_unavailable: '无法打开浏览器窗口。'
+      },
       title: '桌面偏好设置',
       trayDetail: '启用后关闭主窗口会将虚幻盒子留在系统托盘，可从托盘菜单恢复窗口或退出。',
       enableTray: '启用系统托盘',

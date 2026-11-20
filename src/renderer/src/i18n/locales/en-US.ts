@@ -74,6 +74,8 @@ export default {
       engines: { unreal: 'Unreal Engine', unity: 'Unity', godot: 'Godot' }
     },
     projectLibrary: {
+      openFolder: 'Open folder',
+      openNamed: 'Open the folder for {name}',
       title: 'Project registration',
       intro:
         'Register existing project directories manually. Removing a registration leaves the project files in place.',
@@ -98,6 +100,8 @@ export default {
       removeNamed: 'Remove registration for {name}',
       listError: 'Unable to load project registrations',
       errors: {
+        project_offline: 'The registered project directory is offline.',
+        project_folder_unavailable: 'Unable to open the registered folder.',
         project_library_invalid:
           'The project registry file is invalid or uses an unsupported format.',
         project_library_locked: 'The project registry is busy. Try again.',
@@ -377,6 +381,13 @@ export default {
       }
     },
     desktop: {
+      browserUrl: 'HTTPS page address',
+      browserOpen: 'Open browser window',
+      browserErrors: {
+        browser_invalid_url: 'Enter a valid HTTPS address.',
+        browser_already_open: 'Close the current browser window before opening a new one.',
+        browser_unavailable: 'Unable to open the browser window.'
+      },
       title: 'Desktop preferences',
       trayDetail:
         'Keep UEBox in the system tray when you close the main window. Use the tray menu to show the window or quit.',
