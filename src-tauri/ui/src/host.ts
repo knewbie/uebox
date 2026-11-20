@@ -12,6 +12,7 @@ export type CapabilityId =
   | 'nativeCli'
   | 'noteLibrary'
   | 'desktopPreferences'
+  | 'mcpInspection'
   | 'settings'
 
 export interface HostStatus {

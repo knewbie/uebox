@@ -23,6 +23,7 @@ export default {
       agent: 'AI 助手',
       libraries: '项目库与资料库',
       settings: '应用设置',
+      mcpInspection: 'MCP 端点',
       desktopPreferences: '桌面偏好设置',
       noteLibrary: '离线笔记',
       nativeCli: '原生 CLI',
@@ -304,6 +305,24 @@ export default {
       confirmDeleteNote: '确认删除「{title}」及其已保存正文？',
       confirmDeleteNotebook: '确认删除笔记本「{title}」及其全部笔记？独立笔记会保留。',
       approveDelete: '确认删除'
+    },
+    mcp: {
+      title: 'MCP 端点',
+      intro: '查看可信 Streamable HTTP 服务公布的工具。请输入 HTTPS 或本机 HTTP 地址。',
+      endpoint: 'MCP 端点网址',
+      inspect: '检查工具',
+      inspecting: '正在检查…',
+      result: 'MCP {version} · 共 {count} 个工具 · 显示 {shown} 个',
+      cleanup: '服务器未确认已结束本次连接。',
+      errors: {
+        mcp_invalid_endpoint: '请输入有效的 HTTPS 或本机 HTTP 地址。',
+        mcp_timeout: '服务器响应超时。',
+        mcp_redirect: '请输入跳转后的实际 MCP 端点。',
+        mcp_authorization_required: '服务器要求授权。',
+        mcp_version: '此 MCP 协议版本暂不支持。',
+        mcp_no_tools: '此服务器未公布工具。',
+        mcp_unavailable: '无法检查此 MCP 端点。'
+      }
     },
     desktop: {
       title: '桌面偏好设置',

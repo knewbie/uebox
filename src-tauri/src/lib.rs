@@ -6,6 +6,7 @@ mod godot;
 mod godot_agent;
 mod host;
 mod legacy_history;
+mod mcp;
 #[cfg(all(
     any(target_os = "macos", target_os = "linux"),
     any(feature = "unreal", feature = "unity", feature = "godot")
@@ -39,6 +40,7 @@ pub fn configure_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> taur
         .manage(legacy_history::LegacyHistoryHost::default())
         .manage(settings::ModelSettings::default())
         .manage(notes::NotesHost::default())
+        .manage(mcp::McpHost::default())
         .manage(desktop::DesktopState::default())
         .on_menu_event(desktop::menu_event)
         .on_window_event(desktop::window_event);
@@ -66,6 +68,7 @@ pub fn configure_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> taur
     builder.invoke_handler(tauri::generate_handler![
         host::host_status,
         desktop::desktop_tray,
+        mcp::inspect_mcp_endpoint,
         desktop::set_desktop_tray,
         #[cfg(all(
             any(target_os = "macos", target_os = "linux"),

@@ -24,6 +24,7 @@ export default {
       agent: 'AI assistant',
       libraries: 'Project and content libraries',
       settings: 'Application settings',
+      mcpInspection: 'MCP endpoints',
       desktopPreferences: 'Desktop preferences',
       noteLibrary: 'Offline notes',
       nativeCli: 'Native CLI',
@@ -314,6 +315,25 @@ export default {
       confirmDeleteNotebook:
         'Delete notebook “{title}” and all notes inside it? Standalone notes will be kept.',
       approveDelete: 'Confirm deletion'
+    },
+    mcp: {
+      title: 'MCP endpoints',
+      intro:
+        'Inspect the tools advertised by a trusted Streamable HTTP server. Use HTTPS or a local HTTP address.',
+      endpoint: 'MCP endpoint URL',
+      inspect: 'Inspect tools',
+      inspecting: 'Inspecting…',
+      result: 'MCP {version} · {count} tools · showing {shown}',
+      cleanup: 'The server did not confirm that it ended the connection.',
+      errors: {
+        mcp_invalid_endpoint: 'Enter a valid HTTPS or local HTTP endpoint.',
+        mcp_timeout: 'The server did not respond in time.',
+        mcp_redirect: 'Use the final MCP endpoint URL.',
+        mcp_authorization_required: 'The server requires authorization.',
+        mcp_version: 'This MCP protocol version is unsupported.',
+        mcp_no_tools: 'This server does not advertise tools.',
+        mcp_unavailable: 'Unable to inspect this MCP endpoint.'
+      }
     },
     desktop: {
       title: 'Desktop preferences',

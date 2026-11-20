@@ -237,6 +237,14 @@ crates/uebox-cli/target/release/uebox doctor --json
 crates/uebox-cli/target/release/uebox --endpoint "/directory/shown/in/UEBox" projects list --json
 ```
 
+### MCP endpoint inspection / 检查 MCP 端点
+
+Enter an explicitly trusted Streamable HTTP endpoint in the MCP panel, then
+choose **Inspect tools**. The in-process Rust client negotiates the session and
+fetches its advertised tool names. It supports TLS and loopback HTTP, declines
+redirects, bounds responses and cleans up sessions when supported by the server.
+Endpoint credentials and tool execution are outside this inspection flow.
+
 ### System tray / 系统托盘
 
 In Desktop preferences, enable the tray for the current application session.
