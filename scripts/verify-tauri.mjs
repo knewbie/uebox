@@ -107,6 +107,10 @@ run('cargo', [
   '--manifest-path',
   'src-tauri/Cargo.toml',
   '--example',
-  'unreal_ui_harness'
+  'unreal_ui_harness',
+  '--example',
+  'godot_agent_ui_harness',
+  '--example',
+  'godot_editor_fixture'
 ])
 run('pnpm', ['exec', 'vitest', 'run', '--config', 'src-tauri/ui/vitest.e2e.config.ts'])

@@ -345,7 +345,7 @@ fn verify_database_identity(
         let result = unsafe {
             rusqlite::ffi::sqlite3_file_control(
                 connection.handle(),
-                b"main\0".as_ptr().cast(),
+                c"main".as_ptr(),
                 rusqlite::ffi::SQLITE_FCNTL_HAS_MOVED,
                 (&mut moved as *mut i32).cast(),
             )
@@ -370,7 +370,7 @@ fn verify_database_identity(
         let result = unsafe {
             rusqlite::ffi::sqlite3_file_control(
                 connection.handle(),
-                b"main\0".as_ptr().cast(),
+                c"main".as_ptr(),
                 rusqlite::ffi::SQLITE_FCNTL_WIN32_GET_HANDLE,
                 (&mut handle as *mut HANDLE).cast(),
             )
@@ -407,7 +407,7 @@ fn raw_database_header(connection: &Connection) -> Result<[u8; 100], LibraryErro
     let result = unsafe {
         ffi::sqlite3_file_control(
             connection.handle(),
-            b"main\0".as_ptr().cast(),
+            c"main".as_ptr(),
             ffi::SQLITE_FCNTL_FILE_POINTER,
             (&mut file as *mut *mut ffi::sqlite3_file).cast(),
         )
@@ -532,8 +532,9 @@ fn validate_schema(connection: &Connection) -> Result<(), LibraryError> {
             "database schema does not match the project library",
         ));
     }
+    // Registration relies on the unique index to agree with the stored paths.
     let mut check = connection
-        .prepare("PRAGMA quick_check")
+        .prepare("PRAGMA integrity_check")
         .map_err(|error| sqlite_error("prepare integrity check", error))?;
     let results = check
         .query_map([], |row| row.get::<_, String>(0))
@@ -543,7 +544,7 @@ fn validate_schema(connection: &Connection) -> Result<(), LibraryError> {
     if results.as_slice() != ["ok"] {
         return Err(failure(
             ErrorKind::Corrupt,
-            format!("SQLite quick_check: {}", results.join("; ")),
+            format!("SQLite integrity_check: {}", results.join("; ")),
         ));
     }
     Ok(())

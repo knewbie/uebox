@@ -34,7 +34,7 @@ export default {
       title: 'Godot read-only assistant preview',
       intro:
         'Configure a model for this connected editor. Messages and requested project or scene data are sent to the selected service. Only two read-only Godot tools are available; the full assistant is not migrated.',
-      target: 'Fixed Godot session',
+      target: 'Godot connection ID',
       endpoint: 'Full Chat Completions URL',
       model: 'Model name',
       credential: 'Bearer credential (optional, memory only)',
@@ -43,7 +43,7 @@ export default {
       message: 'Message',
       send: 'Send',
       cancel: 'Cancel',
-      unavailable: 'Connect the Godot session before configuring the assistant.',
+      unavailable: 'Connect to the Godot editor before configuring the assistant.',
       error: 'Assistant operation failed',
       user: 'You',
       assistant: 'Assistant',
@@ -57,7 +57,8 @@ export default {
       },
       errors: {
         target_unavailable: 'The selected Godot connection is no longer available.',
-        agent_unavailable: 'This assistant session is no longer available.',
+        agent_unavailable: 'This assistant is no longer available.',
+        run_unavailable: 'This response is no longer available.',
         agent_already_exists: 'This editor already has an assistant or is draining a previous one.',
         agent_busy: 'The editor or assistant is busy; wait for the current operation to finish.',
         invalid_model_configuration: 'The model URL, model name or credential is invalid.',
@@ -68,10 +69,10 @@ export default {
         model_output_limit: 'The model stopped at its output limit.',
         model_provider_error: 'The model service reported an error.',
         agent_step_limit: 'The assistant reached its step limit.',
-        agent_context_limit: 'The conversation exceeds the request size limit.',
+        agent_context_limit: 'The chat exceeds the request size limit.',
         agent_output_buffer_limit: 'The assistant output exceeded the pending display buffer.',
         credential_unavailable: 'The in-memory credential is no longer available.',
-        generic: 'The operation failed. Check the selected session and model configuration.'
+        generic: 'The operation failed. Check the Godot connection and model configuration.'
       }
     },
     godot: {
@@ -80,13 +81,13 @@ export default {
         'Select a trusted local Godot executable and project. The project plugin must already be enabled; it is not installed or enabled here.',
       releaseHint: 'Releasing management does not close the editor.',
       connectionHint:
-        'Connect only when you choose. After an error, refresh the state before trying a starting editor again. An established disconnected session is not reconnected automatically.',
+        'After an error, refresh the state before retrying an editor that is still starting. Reconnecting after an established connection drops requires restarting management.',
       executable: 'Absolute path to the Godot executable',
       executableHint: 'On macOS choose the executable inside the app, not the .app folder.',
       project: 'Absolute path to the Godot project directory',
       launch: 'Start Godot editor',
       launching: 'Starting the selected editor…',
-      session: 'Managed session',
+      session: 'Editor management',
       lastStatus: 'Last observed state',
       connect: 'Connect once',
       readProject: 'Read project',

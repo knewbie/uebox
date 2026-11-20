@@ -52,7 +52,14 @@ enum WindowsPathKind {
 }
 
 #[cfg(any(windows, test))]
-fn windows_path_parts(path: &str) -> Option<(WindowsPathKind, &str)> {
+struct WindowsPath<'a> {
+    kind: WindowsPathKind,
+    verbatim: bool,
+    body: &'a str,
+}
+
+#[cfg(any(windows, test))]
+fn windows_path_parts(path: &str) -> Option<WindowsPath<'_>> {
     fn is_separator(byte: u8) -> bool {
         matches!(byte, b'\\' | b'/')
     }
@@ -73,20 +80,55 @@ fn windows_path_parts(path: &str) -> Option<(WindowsPathKind, &str)> {
             && !matches!(share, "." | "..")
     }
 
-    if let Some(rest) = path.strip_prefix(r"\\?\UNC\") {
-        return (!rest.contains('/') && is_valid_unc(rest)).then_some((WindowsPathKind::Unc, rest));
+    let (kind, verbatim, body) = if let Some(rest) = path.strip_prefix(r"\\?\UNC\") {
+        (WindowsPathKind::Unc, true, rest)
+    } else if let Some(rest) = path.strip_prefix(r"\\?\") {
+        (WindowsPathKind::Drive, true, rest)
+    } else if let Some(rest) = path.strip_prefix(r"\\").or_else(|| path.strip_prefix("//")) {
+        (WindowsPathKind::Unc, false, rest)
+    } else {
+        (WindowsPathKind::Drive, false, path)
+    };
+    let valid_body = match kind {
+        WindowsPathKind::Drive => is_absolute_drive(body),
+        WindowsPathKind::Unc => is_valid_unc(body),
+    };
+    (valid_body && (!verbatim || !body.contains('/'))).then_some(WindowsPath {
+        kind,
+        verbatim,
+        body,
+    })
+}
+
+#[cfg(any(windows, test))]
+fn windows_component_can_cross_namespace(component: &str) -> bool {
+    if component.starts_with(' ')
+        || component.ends_with(['.', ' '])
+        || component
+            .bytes()
+            .any(|byte| byte < b' ' || b"<>:\"|?*".contains(&byte))
+    {
+        return false;
     }
-    if let Some(rest) = path.strip_prefix(r"\\?\") {
-        return (!rest.contains('/') && is_absolute_drive(rest))
-            .then_some((WindowsPathKind::Drive, rest));
+
+    // Win32 can recognize a DOS device even with an extension or spaces before it.
+    let stem = component
+        .split_once('.')
+        .map_or(component, |(stem, _)| stem)
+        .trim_end_matches(' ');
+    if ["CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$", "CLOCK$"]
+        .iter()
+        .any(|device| stem.eq_ignore_ascii_case(device))
+    {
+        return false;
     }
-    if is_absolute_drive(path) {
-        return Some((WindowsPathKind::Drive, path));
-    }
-    if let Some(rest) = path.strip_prefix(r"\\").or_else(|| path.strip_prefix("//")) {
-        return is_valid_unc(rest).then_some((WindowsPathKind::Unc, rest));
-    }
-    None
+    !stem
+        .strip_suffix(|character: char| {
+            character.is_ascii_digit() || matches!(character, '¹' | '²' | '³')
+        })
+        .is_some_and(|prefix| {
+            prefix.eq_ignore_ascii_case("COM") || prefix.eq_ignore_ascii_case("LPT")
+        })
 }
 
 #[cfg(any(windows, test))]
@@ -96,13 +138,13 @@ fn windows_path_matches(approved: &str, peer: &str) -> bool {
     if peer.len() > approved.len().saturating_add(7) {
         return false;
     }
-    let Some((approved_kind, approved)) = windows_path_parts(approved) else {
+    let Some(approved_path) = windows_path_parts(approved) else {
         return false;
     };
-    let Some((peer_kind, peer)) = windows_path_parts(peer) else {
+    let Some(peer_path) = windows_path_parts(peer) else {
         return false;
     };
-    if approved_kind != peer_kind {
+    if approved_path.kind != peer_path.kind {
         return false;
     }
     fn strip_trailing(path: &str) -> &str {
@@ -110,8 +152,8 @@ fn windows_path_matches(approved: &str, peer: &str) -> bool {
             .or_else(|| path.strip_suffix('/'))
             .unwrap_or(path)
     }
-    let approved = strip_trailing(approved);
-    let peer = strip_trailing(peer);
+    let approved = strip_trailing(approved_path.body);
+    let peer = strip_trailing(peer_path.body);
     if approved.len() != peer.len()
         || approved
             .split(['\\', '/'])
@@ -122,12 +164,23 @@ fn windows_path_matches(approved: &str, peer: &str) -> bool {
     {
         return false;
     }
+    let drive = approved_path.kind == WindowsPathKind::Drive;
+    // The byte comparison below requires identical components, so only the
+    // approved spelling needs this check. Start after the optional drive designator.
+    if approved_path.verbatim != peer_path.verbatim
+        && !approved
+            .split(['\\', '/'])
+            .skip(usize::from(drive))
+            .all(windows_component_can_cross_namespace)
+    {
+        return false;
+    }
     approved
         .bytes()
         .zip(peer.bytes())
         .enumerate()
         .all(|(index, (left, right))| {
-            if approved_kind == WindowsPathKind::Drive && index == 0 {
+            if drive && index == 0 {
                 left.eq_ignore_ascii_case(&right)
             } else {
                 let normalize = |byte| if byte == b'/' { b'\\' } else { byte };

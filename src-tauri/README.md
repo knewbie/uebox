@@ -1,15 +1,15 @@
 # Tauri migration preview / Tauri 迁移预览
 
 This is a separate preview entry. It does not implement the Electron bridge. A limited
-Unity project and active-scene query, an Unreal project query, and a Godot editor
-preview are available only after explicit user actions.
+Unity project and active-scene query, an Unreal project query, and a Godot
+preview with a read-only assistant are available only after explicit user actions.
 Use the Electron application for existing features.
 Its identifier is separate so it does not use the Electron application's webview
 preferences. Node is used only to build/serve the frontend during development;
 the application backend and commands run in the Tauri Rust process.
 
 这是独立的迁移预览入口，不实现 Electron 桥；只有用户主动操作才会执行有限的 Unity
-项目和活动场景查询、Unreal 项目只读查询，以及 Godot 编辑器预览。现有功能请继续使用
+项目和活动场景查询、Unreal 项目只读查询，以及带只读助手的 Godot 预览。现有功能请继续使用
 Electron 版本。预览版使用独立标识，不读取 Electron 的 WebView 偏好设置。Node 只在
 开发时构建或提供前端文件，应用后端和命令运行在 Tauri 的 Rust 进程内。
 
@@ -190,21 +190,39 @@ cargo test --manifest-path src-tauri/Cargo.toml --test unity_command
 cargo test --manifest-path src-tauri/Cargo.toml --test unreal_command
 cargo test --manifest-path src-tauri/Cargo.toml --test engine_features
 cargo test --manifest-path src-tauri/Cargo.toml --test godot_command
-cargo build --manifest-path src-tauri/Cargo.toml --example unreal_ui_harness
 pnpm tauri:ui:test
-pnpm exec vitest run --config src-tauri/ui/vitest.e2e.config.ts
 pnpm exec vue-tsc --noEmit -p src-tauri/ui/tsconfig.json
 pnpm tauri:ui:build
 ```
 
+For the Godot assistant preview, run the scoped Rust checks, build the two
+fixtures, then run the Godot UI E2E. It mounts Vue and calls the real Tauri
+commands through the mock runtime. The editor and model fixtures use loopback and
+temporary projects. No native WebView, real model, or user project is needed.
+
+Godot 助手预览可独立运行以下 Rust 检查、构建两个夹具，再运行 Godot UI E2E。
+测试挂载 Vue，通过 Tauri 模拟运行时调用真实命令。编辑器和模型夹具使用环回地址和
+临时工程，无需原生 WebView、真实模型或用户工程。
+
+```sh
+cargo test --locked --manifest-path src-tauri/Cargo.toml --no-default-features \
+  --features godot --lib --test godot_command --test godot_agent_command \
+  --test engine_features --test host_binary
+cargo build --locked --manifest-path src-tauri/Cargo.toml --no-default-features \
+  --features godot --example godot_agent_ui_harness --example godot_editor_fixture
+pnpm exec vitest run --config src-tauri/ui/vitest.e2e.config.ts src-tauri/ui/e2e/godot-agent.e2e.test.ts
+```
+
 To opt in to the real Godot command test, set `UEBOX_TEST_GODOT_BIN` to a trusted
 native executable. This Unix-only test uses temporary projects, a private editor
-home, and two headless test-owned editors; it closes only those editors after
-verifying release. It has been run on macOS, not Windows or Linux.
+home, two headless test-owned editors and a loopback model fixture. It verifies
+that the Agent reads only the selected editor and that releasing management
+leaves the editors running. The test then closes its own editors.
 
 真实 Godot 命令测试需将 `UEBOX_TEST_GODOT_BIN` 指向可信的本机可执行文件。测试使用临时
-项目、隔离的编辑器配置目录和两个由测试启动的 headless 编辑器，验证释放后只关闭测试
-自己的编辑器。该测试仅适用于 Unix，目前只在 macOS 运行，未验证 Windows 或 Linux。
+项目、隔离的编辑器配置目录、两个由测试启动的 headless 编辑器和环回模型夹具。
+测试验证助手仅读取所选编辑器、释放管理后编辑器仍在运行，随后关闭自己的编辑器。
+该测试仅适用于 Unix。
 
 ```sh
 UEBOX_TEST_GODOT_BIN=/path/to/Godot cargo test --manifest-path src-tauri/Cargo.toml \
@@ -215,11 +233,16 @@ UEBOX_TEST_GODOT_BIN=/path/to/Godot cargo test --manifest-path src-tauri/Cargo.t
 
 The Unreal UI integration test uses a test-only transport into the real Tauri
 commands and a Rust WebSocket fixture on an isolated local port. It does not test a
-native WebView or a real Unreal Editor. It locates the fixture under
+native WebView or a real Unreal Editor. Both UI E2E suites locate fixtures under
 `CARGO_TARGET_DIR` when set, or `src-tauri/target` otherwise; use the same value
 for the Cargo build and Vitest run.
 
 Unreal 界面集成测试使用仅用于测试的传输调用真实 Tauri 命令，并在隔离的本地端口运行
-Rust WebSocket 夹具；它不验证原生 WebView 或真实 Unreal 编辑器。夹具从设置的
-`CARGO_TARGET_DIR` 读取，未设置时读取 `src-tauri/target`；Cargo 构建和 Vitest 运行
-时需使用相同的值。
+Rust WebSocket 夹具；它不验证原生 WebView 或真实 Unreal 编辑器。两套 UI E2E 均从
+`CARGO_TARGET_DIR` 读取夹具，未设置时使用 `src-tauri/target`。Cargo 构建和 Vitest
+运行时需使用相同的值。
+
+```sh
+cargo build --locked --manifest-path src-tauri/Cargo.toml --example unreal_ui_harness
+pnpm exec vitest run --config src-tauri/ui/vitest.e2e.config.ts src-tauri/ui/e2e/unreal.e2e.test.ts
+```

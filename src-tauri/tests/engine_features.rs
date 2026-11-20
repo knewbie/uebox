@@ -141,6 +141,8 @@ fn single_engine_dependency_graph_excludes_other_engines() {
                 "uebox-engine-unreal ",
                 "uebox-godot-session ",
                 "uebox-engine-godot ",
+                "uebox-agent-core ",
+                "uebox-agent-godot-tools ",
             ],
         ),
         (
@@ -150,6 +152,8 @@ fn single_engine_dependency_graph_excludes_other_engines() {
                 "uebox-engine-unity ",
                 "uebox-godot-session ",
                 "uebox-engine-godot ",
+                "uebox-agent-core ",
+                "uebox-agent-godot-tools ",
             ],
         ),
         (

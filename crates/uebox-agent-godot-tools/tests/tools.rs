@@ -902,6 +902,7 @@ async fn disconnected_session_is_not_reconnected_or_rebound() {
         .execute(binding.target(), json!({}))
         .await
         .is_err());
+    assert!(!binding.validator()(&binding.target()));
     let after_failure = fs::read_to_string(editor.project.join(".fixture-connections")).unwrap();
     assert!(binding
         .project_info_tool()

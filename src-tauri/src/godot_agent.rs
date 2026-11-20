@@ -7,7 +7,7 @@ use std::time::Duration;
 use tauri::Runtime;
 use uebox_agent_core::{
     AgentSession, Cancellation, Engine, Error, ModelEvent, OpenAiProvider, ProviderConfig,
-    ReadOnlyTool, RunPhase, RunTarget, ToolDefinition, ToolFuture, ToolRegistry,
+    ReadOnlyTool, RunTarget, ToolDefinition, ToolFuture, ToolRegistry,
 };
 use uebox_agent_godot_tools::GodotToolBinding;
 use uebox_engine_core::{
@@ -36,12 +36,30 @@ struct Target {
 struct Agent {
     owner: String,
     target_id: String,
-    session: Arc<AgentSession>,
+    session: Option<Arc<AgentSession>>,
     credential: Arc<Mutex<Option<String>>>,
     run: Option<ActiveRun>,
     retired: bool,
     closed: bool,
 }
+
+impl Agent {
+    fn run_is_active(&self) -> bool {
+        self.session
+            .as_ref()
+            .is_some_and(|session| session.snapshot().run_id.is_some())
+    }
+
+    fn retain_after_retirement(&mut self) -> bool {
+        if !self.retired || self.run_is_active() {
+            return true;
+        }
+        // The terminal poll needs its receipt, but no longer needs the provider or history.
+        self.session = None;
+        !self.closed && self.run.is_some()
+    }
+}
+
 struct ActiveRun {
     id: u64,
     cancellation: Cancellation,
@@ -84,12 +102,13 @@ impl ReadOnlyTool for TrackedTool {
         let target_id = self.target_id.clone();
         Box::pin(async move {
             let result = work.await;
-            let terminal = tokio::task::spawn_blocking(move || match handle.try_lock() {
+            // A contending status/read call can hold this mutex just after the tool
+            // failed. Wait for the state so a terminal read cannot trigger another model step.
+            let terminal = tokio::task::spawn_blocking(move || match handle.lock() {
                 Ok(mut guard) => guard
                     .as_mut()
                     .is_none_or(|session| !matches!(session.status(), Ok(SessionState::Ready))),
-                Err(std::sync::TryLockError::WouldBlock) => false,
-                Err(std::sync::TryLockError::Poisoned(_)) => true,
+                Err(_) => true,
             })
             .await
             .unwrap_or(true);
@@ -168,10 +187,9 @@ impl AgentHost {
                 run.cancellation.cancel();
             }
         }
-        // An active UI can still read the terminal reason and draining state.
         state
             .agents
-            .retain(|_, agent| !agent.retired || agent.run.is_some());
+            .retain(|_, agent| agent.retain_after_retirement());
     }
 
     fn close_agent(&self, id: &str, owner: &str) -> Result<(), String> {
@@ -195,7 +213,7 @@ impl AgentHost {
         }
         state
             .agents
-            .retain(|_, agent| !agent.closed || agent.session.snapshot().run_id.is_some());
+            .retain(|_, agent| agent.retain_after_retirement());
         Ok(())
     }
 }
@@ -317,7 +335,7 @@ pub(crate) async fn create_godot_agent<R: Runtime>(
         if state.agents.values().any(|agent| agent.target_id == session_id) { return Err("agent_already_exists".into()); }
         let mut agent_id = id()?;
         while state.agents.contains_key(&agent_id) { agent_id = id()?; }
-        state.agents.insert(agent_id.clone(), Agent { owner, target_id: session_id, session: Arc::new(session), credential: secret, run: None, retired: false, closed: false });
+        state.agents.insert(agent_id.clone(), Agent { owner, target_id: session_id, session: Some(Arc::new(session)), credential: secret, run: None, retired: false, closed: false });
         Ok(CreatedAgent { agent_id })
     }).await.map_err(|_| "agent_worker_error".to_string())?
 }
@@ -383,7 +401,12 @@ pub(crate) async fn start_godot_agent<R: Runtime>(
             .handle
             .clone();
         let agent = agent_mut(&mut state, &agent_id, &owner)?;
-        let run = agent.session.start(text).map_err(error_code)?;
+        let run = agent
+            .session
+            .as_ref()
+            .ok_or("agent_unavailable")?
+            .start(text)
+            .map_err(error_code)?;
         agent.run = Some(ActiveRun {
             id: run.id(),
             cancellation: run.cancellation(),
@@ -414,7 +437,7 @@ pub(crate) async fn start_godot_agent<R: Runtime>(
                     .and_then(|agent| agent.run.as_mut())
                     .filter(|run| run.id == run_id && !run.cancelled)
                 {
-                queue_text(run, text);
+                    queue_text(run, text);
                 }
             })
             .await
@@ -435,15 +458,21 @@ pub(crate) async fn start_godot_agent<R: Runtime>(
     tauri::async_runtime::spawn(async move {
         loop {
             tokio::time::sleep(Duration::from_millis(250)).await;
-            let active = {
+            let retired = {
                 let state = monitor_host.state.lock().unwrap_or_else(|e| e.into_inner());
-                state.agents.get(&monitor_id).is_some_and(|agent| {
-                    agent.run.as_ref().is_some_and(|run| run.id == run_id)
-                        && agent.session.snapshot().run_id == Some(run_id)
-                })
+                state
+                    .agents
+                    .get(&monitor_id)
+                    .filter(|agent| {
+                        agent.run.as_ref().is_some_and(|run| run.id == run_id)
+                            && agent.run_is_active()
+                    })
+                    .map(|agent| agent.retired)
             };
-            if !active {
-                break;
+            match retired {
+                None => break,
+                Some(true) => continue, // Keep ownership until an admitted tool finishes.
+                Some(false) => {}
             }
             let handle = Arc::clone(&handle);
             let terminal = tauri::async_runtime::spawn_blocking(move || match handle.try_lock() {
@@ -457,13 +486,12 @@ pub(crate) async fn start_godot_agent<R: Runtime>(
             .unwrap_or(true);
             if terminal {
                 monitor_host.retire(&target_id);
-                break;
             }
         }
         let mut state = monitor_host.state.lock().unwrap_or_else(|e| e.into_inner());
         state
             .agents
-            .retain(|_, agent| !agent.closed || agent.session.snapshot().run_id.is_some());
+            .retain(|_, agent| agent.retain_after_retirement());
     });
     Ok(StartedRun { agent_id, run_id })
 }
@@ -486,20 +514,19 @@ pub(crate) fn poll_godot_agent<R: Runtime>(
         .filter(|agent| agent.owner == window.label() && !agent.closed)
         .ok_or("agent_unavailable")?;
     let retired = agent.retired;
-    let snapshot = agent.session.snapshot();
+    let in_flight = agent.run_is_active();
     let run = agent
         .run
         .as_mut()
         .filter(|run| run.id == run_id)
         .ok_or("run_unavailable")?;
-    let phase = match (&run.result, snapshot.phase, run.cancelled) {
-        (Some(_), Some(RunPhase::Draining), _) => "draining",
-        (Some(_), _, _) if snapshot.run_id.is_some() => "draining",
-        (Some(_), _, _) if run.forced_error.is_some() => "failed",
-        (Some(_), _, true) => "cancelled",
-        (Some(Ok(())), _, false) => "completed",
-        (Some(Err(_)), _, false) => "failed",
-        (None, _, true) => "cancelling",
+    let phase = match &run.result {
+        Some(_) if in_flight => "draining",
+        Some(_) if retired || run.forced_error.is_some() => "failed",
+        Some(_) if run.cancelled => "cancelled",
+        Some(Ok(())) => "completed",
+        Some(Err(_)) => "failed",
+        None if run.cancelled => "cancelling",
         _ => "running",
     };
     let error = if retired {
@@ -516,7 +543,7 @@ pub(crate) fn poll_godot_agent<R: Runtime>(
     };
     run.queued_bytes = 0;
     let fragments = std::mem::take(&mut run.fragments);
-    if retired && snapshot.run_id.is_none() && run.result.is_some() {
+    if retired && !in_flight && run.result.is_some() {
         state.agents.remove(&agent_id);
     }
     Ok(RunUpdate {
@@ -541,11 +568,15 @@ pub(crate) fn cancel_godot_agent<R: Runtime>(
         .lock()
         .unwrap_or_else(|e| e.into_inner());
     let agent = agent_mut(&mut state, &agent_id, window.label())?;
+    let in_flight = agent.run_is_active();
     let run = agent
         .run
         .as_mut()
         .filter(|run| run.id == run_id)
         .ok_or("run_unavailable")?;
+    if !in_flight {
+        return Ok(());
+    }
     run.cancelled = true;
     run.fragments.clear();
     run.queued_bytes = 0;
@@ -583,5 +614,40 @@ mod tests {
         assert!(run.cancellation.is_cancelled());
         assert_eq!(run.forced_error, Some("agent_output_buffer_limit"));
         assert!(run.fragments.is_empty());
+    }
+
+    #[test]
+    fn retiring_an_idle_target_releases_the_agent_even_if_no_one_polls_again() {
+        let host = AgentHost::default();
+        let provider =
+            OpenAiProvider::new(ProviderConfig::new("http://127.0.0.1:9/fixture", "fixture"))
+                .unwrap();
+        let target = RunTarget::new(Engine::Godot, "project", "editor", 1).unwrap();
+        let session = Arc::new(
+            AgentSession::new(provider, ToolRegistry::new(target), Arc::new(|_| true), 1).unwrap(),
+        );
+        let weak = Arc::downgrade(&session);
+        host.state.lock().unwrap().agents.insert(
+            "agent".into(),
+            Agent {
+                owner: "main".into(),
+                target_id: "target".into(),
+                session: Some(session),
+                credential: Arc::new(Mutex::new(Some("fixture".into()))),
+                retired: false,
+                closed: false,
+                run: Some(ActiveRun {
+                    id: 1,
+                    cancellation: Cancellation::new(),
+                    cancelled: false,
+                    result: Some(Ok(())),
+                    fragments: vec!["unpolled reply".into()],
+                    queued_bytes: 14,
+                    forced_error: None,
+                }),
+            },
+        );
+        host.retire("target");
+        assert!(weak.upgrade().is_none());
     }
 }

@@ -574,6 +574,52 @@ fn corrupt_page_is_reported_without_initializing_or_clearing_the_database() {
 }
 
 #[test]
+fn index_key_corruption_is_rejected_before_opening_or_registering() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = project(&dir, "game");
+    let database = dir.path().join("library.sqlite");
+    let mut library = ProjectLibrary::create_new(&database).unwrap();
+    library.register(EngineKind::Unreal, "keep", &root).unwrap();
+
+    let connection = Connection::open(&database).unwrap();
+    let page: usize = connection
+        .query_row(
+            "SELECT rootpage FROM sqlite_schema WHERE name='sqlite_autoindex_projects_1'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let page_size: usize = connection
+        .pragma_query_value(None, "page_size", |row| row.get(0))
+        .unwrap();
+    drop(connection);
+
+    // Alter the indexed path without changing the table row or the index layout.
+    let mut bytes = fs::read(&database).unwrap();
+    let index = &mut bytes[(page - 1) * page_size..page * page_size];
+    let key = root.to_str().unwrap().as_bytes();
+    let offset = index
+        .windows(key.len())
+        .position(|part| part == key)
+        .unwrap();
+    index[offset + key.len() - 1] = b'f';
+    fs::write(&database, &bytes).unwrap();
+
+    assert_eq!(
+        ProjectLibrary::open_existing(&database).unwrap_err().kind,
+        ErrorKind::Corrupt
+    );
+    assert_eq!(
+        library
+            .register(EngineKind::Unreal, "duplicate", &root)
+            .unwrap_err()
+            .kind,
+        ErrorKind::Corrupt
+    );
+    assert_eq!(fs::read(database).unwrap(), bytes);
+}
+
+#[test]
 fn existing_destination_sidecars_are_never_touched() {
     let dir = tempfile::tempdir().unwrap();
     let database = dir.path().join("library.sqlite");

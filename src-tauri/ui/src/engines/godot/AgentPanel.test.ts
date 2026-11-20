@@ -139,6 +139,44 @@ it('never renders an unexpected error payload that could contain a credential', 
   wrapper.unmount()
 })
 
+it('preserves the disconnect reason and prevents sending to a retired target', async () => {
+  vi.mocked(invoke).mockImplementation((command) => {
+    if (command === 'create_godot_agent') return Promise.resolve({ agentId: 'agent-a' })
+    if (command === 'start_godot_agent') return Promise.resolve({ agentId: 'agent-a', runId: 1 })
+    if (command === 'poll_godot_agent') {
+      return Promise.resolve({
+        agentId: 'agent-a',
+        runId: 1,
+        phase: 'failed',
+        fragments: [],
+        error: 'target_unavailable'
+      })
+    }
+    return Promise.resolve()
+  })
+  const wrapper = mount(AgentPanel, {
+    props: { sessionId: 'target-a', ready: true },
+    global: { plugins: [createAppI18n('en-US')] }
+  })
+  try {
+    await wrapper
+      .get('input[name="agent-endpoint"]')
+      .setValue('http://127.0.0.1:5555/v1/chat/completions')
+    await wrapper.get('input[name="agent-model"]').setValue('fixture')
+    await wrapper.get('form.agent-form').trigger('submit')
+    await flushPromises()
+    const message = wrapper.get('textarea[name="agent-message"]')
+    await message.setValue('question')
+    await wrapper.findAll('form.agent-form')[1].trigger('submit')
+    await flushPromises()
+    expect(wrapper.text()).toContain('The selected Godot connection is no longer available.')
+    expect(message.attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-agent-close]').attributes('disabled')).toBeUndefined()
+  } finally {
+    wrapper.unmount()
+  }
+})
+
 it('ignores text and phase carrying a different run identity', async () => {
   let resolvePoll: (value: unknown) => void = () => {}
   vi.mocked(invoke).mockImplementation((command) => {

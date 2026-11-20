@@ -25,6 +25,7 @@ const runId = ref<number | null>(null)
 const phase = ref<AgentPhase | null>(null)
 const busy = ref(false)
 const cancelled = ref(false)
+const unavailable = ref(false)
 const error = ref<string | null>(null)
 const messages = ref<{ role: 'user' | 'assistant'; text: string }[]>([])
 let epoch = 0
@@ -47,11 +48,12 @@ const canSend = computed(
     Boolean(agentId.value) &&
     !busy.value &&
     !active.value &&
+    !unavailable.value &&
     Boolean(message.value.trim())
 )
+const unavailableErrors = new Set(['target_unavailable', 'agent_unavailable', 'run_unavailable'])
 const knownErrors = new Set([
-  'target_unavailable',
-  'agent_unavailable',
+  ...unavailableErrors,
   'agent_already_exists',
   'agent_busy',
   'invalid_model_configuration',
@@ -68,6 +70,7 @@ const knownErrors = new Set([
 ])
 function displayError(cause: unknown): void {
   const code = typeof cause === 'string' && knownErrors.has(cause) ? cause : 'generic'
+  if (agentId.value && unavailableErrors.has(code)) unavailable.value = true
   error.value = t(`tauriPreview.godotAgent.errors.${code}`)
 }
 function reset(): void {
@@ -80,6 +83,7 @@ function reset(): void {
   phase.value = null
   busy.value = false
   cancelled.value = false
+  unavailable.value = false
   credential.value = ''
   messages.value = []
   error.value = null
@@ -132,6 +136,10 @@ async function poll(id: string, run: number, current: number): Promise<void> {
   } catch (cause) {
     if (current !== epoch || agentId.value !== id || runId.value !== run) return
     displayError(cause)
+    if (typeof cause === 'string' && unavailableErrors.has(cause)) {
+      phase.value = 'failed'
+      return
+    }
     // A failed poll cannot prove that a run has drained.
     phase.value = 'draining'
     timer = setTimeout(() => void poll(id, run, current), 500)
@@ -163,7 +171,14 @@ async function send(): Promise<void> {
   }
 }
 async function cancel(): Promise<void> {
-  if (!agentId.value || runId.value === null || !active.value || cancelled.value) return
+  if (
+    !agentId.value ||
+    runId.value === null ||
+    !active.value ||
+    cancelled.value ||
+    unavailable.value
+  )
+    return
   const id = agentId.value
   const run = runId.value
   const current = epoch
@@ -172,7 +187,7 @@ async function cancel(): Promise<void> {
   try {
     await cancelAgent(id, run)
   } catch (cause) {
-    if (current === epoch) displayError(cause)
+    if (current === epoch && runId.value === run && active.value) displayError(cause)
   }
 }
 </script>
@@ -239,15 +254,18 @@ async function cancel(): Promise<void> {
           id="agent-message"
           v-model:value="message"
           name="agent-message"
-          :disabled="!ready || busy || active"
+          :disabled="!ready || busy || active || unavailable"
         />
         <div class="agent-actions">
           <AppButton data-agent-send html-type="submit" variant="primary" :disabled="!canSend">{{
             t('tauriPreview.godotAgent.send')
           }}</AppButton>
-          <AppButton data-agent-cancel :disabled="!active || cancelled" @click="cancel">{{
-            t('tauriPreview.godotAgent.cancel')
-          }}</AppButton>
+          <AppButton
+            data-agent-cancel
+            :disabled="!active || cancelled || unavailable"
+            @click="cancel"
+            >{{ t('tauriPreview.godotAgent.cancel') }}</AppButton
+          >
         </div>
       </form>
     </div>

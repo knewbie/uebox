@@ -156,10 +156,9 @@ impl Binding {
             return false;
         }
         match self.session.try_lock() {
-            Ok(guard) => guard.as_ref().is_some_and(|session| {
-                session.project_path() == self.selection.project().root()
-                    && session.instance_id() == self.selection.instance_id()
-            }),
+            Ok(mut guard) => guard
+                .as_mut()
+                .is_some_and(|session| self.same_ready_session(session)),
             Err(std::sync::TryLockError::WouldBlock) => true,
             Err(std::sync::TryLockError::Poisoned(_)) => false,
         }

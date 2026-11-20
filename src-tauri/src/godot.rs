@@ -201,12 +201,18 @@ pub(crate) async fn connect_godot(
         let handle = lookup(&map, &id)?;
         {
             let mut guard = handle.lock().unwrap_or_else(|error| error.into_inner());
-            if !guard.as_mut().is_some_and(|session| matches!(session.status(), Ok(SessionState::Ready))) {
+            if !guard
+                .as_mut()
+                .is_some_and(|session| matches!(session.status(), Ok(SessionState::Ready)))
+            {
                 return Err("target_unavailable".to_string());
             }
         }
         let guard = map.lock().unwrap_or_else(|error| error.into_inner());
-        if !guard.get(&id).is_some_and(|current| Arc::ptr_eq(current, &handle)) {
+        if !guard
+            .get(&id)
+            .is_some_and(|current| Arc::ptr_eq(current, &handle))
+        {
             return Err("Unknown Godot session".to_string());
         }
         agent.register(&id, handle, project, instance)?;

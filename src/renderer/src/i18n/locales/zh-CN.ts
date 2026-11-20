@@ -33,7 +33,7 @@ export default {
       title: 'Godot 只读助手预览',
       intro:
         '为当前已连接的编辑器配置模型。消息和请求读取的项目或场景数据会发送到所选服务。目前仅支持两个 Godot 只读工具，完整助手尚未迁移。',
-      target: '固定的 Godot 会话',
+      target: 'Godot 连接 ID',
       endpoint: '完整的 Chat Completions 地址',
       model: '模型名称',
       credential: 'Bearer 凭据（可选，仅保存在内存）',
@@ -42,7 +42,7 @@ export default {
       message: '消息',
       send: '发送',
       cancel: '取消',
-      unavailable: '请先连接 Godot 会话，再配置助手。',
+      unavailable: '请先连接 Godot 编辑器，再配置助手。',
       error: '助手操作失败',
       user: '你',
       assistant: '助手',
@@ -56,7 +56,8 @@ export default {
       },
       errors: {
         target_unavailable: '所选 Godot 连接已不可用。',
-        agent_unavailable: '此助手会话已不可用。',
+        agent_unavailable: '此助手已不可用。',
+        run_unavailable: '此轮回复已不可用。',
         agent_already_exists: '此编辑器已有助手，或上一次操作仍在等待结束。',
         agent_busy: '编辑器或助手正忙，请等待当前操作结束。',
         invalid_model_configuration: '模型地址、模型名称或凭据无效。',
@@ -70,7 +71,7 @@ export default {
         agent_context_limit: '对话已超出请求大小限制。',
         agent_output_buffer_limit: '助手输出超出了待显示缓冲区的大小限制。',
         credential_unavailable: '内存中的凭据已不可用。',
-        generic: '操作失败，请检查所选会话和模型配置。'
+        generic: '操作失败，请检查 Godot 连接和模型配置。'
       }
     },
     godot: {
@@ -79,13 +80,13 @@ export default {
         '选择可信的本机 Godot 可执行文件和项目。项目插件必须预先启用；此处不会安装或启用插件。',
       releaseHint: '释放管理不会关闭编辑器。',
       connectionHint:
-        '只有主动操作才会连接。出错后请先刷新状态，再手动尝试连接启动中的编辑器；已建立连接的会话断开后不会自动重连。',
+        '出错后请先刷新状态，再尝试连接仍在启动的编辑器。连接建立后若断开，需重新启动管理。',
       executable: 'Godot 可执行文件绝对路径',
       executableHint: 'macOS 请选择应用内部的可执行文件，而不是 .app 文件夹。',
       project: 'Godot 项目目录绝对路径',
       launch: '启动 Godot 编辑器',
       launching: '正在启动所选编辑器…',
-      session: '受管理会话',
+      session: '编辑器管理',
       lastStatus: '上次观察到的状态',
       connect: '连接一次',
       readProject: '读取项目',

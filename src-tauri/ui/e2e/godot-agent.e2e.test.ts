@@ -21,7 +21,13 @@ let server: Server | undefined
 afterEach(async () => {
   child?.kill()
   child = undefined
-  if (server) await new Promise<void>((done) => server!.close(() => done()))
+  if (server) {
+    const model = server
+    await new Promise<void>((done) => {
+      model.close(() => done())
+      model.closeAllConnections()
+    })
+  }
   server = undefined
   if (project) await rm(project, { recursive: true, force: true })
   project = undefined
@@ -92,6 +98,7 @@ it('uses a fixed Godot target through real Rust commands, local streaming model,
   await writeFile(resolve(project, 'project.godot'), 'config_version=5\n')
   const bodies: string[] = []
   const authorizations: (string | undefined)[] = []
+  let finishFirstAnswer: (() => void) | undefined
   server = createServer((request, response) => {
     let body = ''
     request.setEncoding('utf8')
@@ -128,10 +135,8 @@ it('uses a fixed Godot target through real Rust commands, local streaming model,
         response.end(event({ tool_calls: calls }, 'tool_calls') + 'data: [DONE]\n\n')
       } else if (bodies.length === 2) {
         response.write(event({ content: 'First ' }, null))
-        setTimeout(
-          () => response.end(event({ content: 'answer' }, 'stop') + 'data: [DONE]\n\n'),
-          300
-        )
+        finishFirstAnswer = () =>
+          response.end(event({ content: 'answer' }, 'stop') + 'data: [DONE]\n\n')
       } else response.end(event({ content: 'Follow-up answer' }, 'stop') + 'data: [DONE]\n\n')
     })
   })
@@ -196,8 +201,15 @@ it('uses a fixed Godot target through real Rust commands, local streaming model,
     await wrapper.findAll('form.agent-form')[1].trigger('submit')
     await eventually(() => expect(wrapper.text()).toContain('First '))
     expect(wrapper.text()).not.toContain('First answer')
+    finishFirstAnswer!()
     await eventually(() => expect(wrapper.text()).toContain('First answer'))
     await eventually(() => expect(wrapper.text()).toContain('Completed'))
+    const completedRun = { agentId: createdId, runId: 1 }
+    await callRust('cancel_godot_agent', completedRun)
+    await expect(callRust('poll_godot_agent', completedRun)).resolves.toMatchObject({
+      phase: 'completed',
+      error: null
+    })
     expect(bodies).toHaveLength(2)
     expect(bodies[1]).toContain('Tauri agent fixture project')
     expect(bodies[1]).toContain('FixtureWorld')
@@ -218,6 +230,9 @@ it('uses a fixed Godot target through real Rust commands, local streaming model,
     await wrapper.get('[data-agent-cancel]').trigger('click')
     await eventually(() => expect(wrapper.text()).toContain('Draining'))
     expect(wrapper.get('[data-agent-send]').attributes('disabled')).toBeDefined()
+    await expect(
+      callRust('start_godot_agent', { agentId: createdId, text: 'must wait for the tool' })
+    ).rejects.toContain('agent_busy')
     await writeFile(resolve(project, 'fixture-release'), 'release')
     await eventually(() => expect(wrapper.text()).toContain('Cancelled'))
     expect(bodies).toHaveLength(3)
@@ -278,9 +293,11 @@ it('uses a fixed Godot target through real Rust commands, local streaming model,
     await wrapper.findAll('form.agent-form')[1].trigger('submit')
     await eventually(() => expect(bodies).toHaveLength(7))
     process.kill(secondPid, 'SIGTERM') // only the fixture process created by this test
-    await eventually(() =>
+    await eventually(() => {
       expect(wrapper.text()).toContain('selected Godot connection is no longer available')
-    )
+      expect(wrapper.get('.agent-chat [role="status"]').text()).toBe('Failed')
+    })
+    expect(wrapper.get('textarea[name="agent-message"]').attributes('disabled')).toBeDefined()
     await expect(
       callRust('start_godot_agent', { agentId: secondAgent, text: 'no' })
     ).rejects.toContain('agent_unavailable')
@@ -307,10 +324,11 @@ it('uses a fixed Godot target through real Rust commands, local streaming model,
     await writeFile(resolve(project, 'fixture-disconnect'), 'disconnect')
     await wrapper.get('textarea[name="agent-message"]').setValue('Read after bridge disconnect')
     await wrapper.findAll('form.agent-form')[1].trigger('submit')
-    await eventually(() =>
+    await eventually(() => {
       expect(wrapper.text()).toContain('selected Godot connection is no longer available')
-    )
-    await new Promise((done) => setTimeout(done, 300))
+      expect(wrapper.get('.agent-chat [role="status"]').text()).toBe('Failed')
+    })
+    expect(wrapper.get('textarea[name="agent-message"]').attributes('disabled')).toBeDefined()
     expect(bodies).toHaveLength(8)
     await callRust('release_godot_session', { sessionId: third.sessionId })
   } finally {
