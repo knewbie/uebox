@@ -33,6 +33,7 @@ uebox-chat-history = { path = "../crates/uebox-chat-history" }
 uebox-legacy-history = { path = "../crates/uebox-legacy-history" }
 uebox-project-library = { path = "../crates/uebox-project-library" }
 uebox-project-collections = { path = "../crates/uebox-project-collections" }
+uebox-notes = { path = "../crates/uebox-notes" }
 uebox-engine-unity = { path = "../crates/uebox-engine-unity", optional = true }
 uebox-engine-unreal = { path = "../crates/uebox-engine-unreal", optional = true }
 uebox-godot-session = { path = "../crates/uebox-godot-session", optional = true }

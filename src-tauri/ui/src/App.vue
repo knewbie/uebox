@@ -21,6 +21,7 @@ import ProjectLibraryPanel from './projects/ProjectLibraryPanel.vue'
 import AgentHistoryPanel from './history/AgentHistoryPanel.vue'
 import LegacyHistoryPanel from './legacy-history/LegacyHistoryPanel.vue'
 import ModelSettingsPanel from './settings/ModelSettingsPanel.vue'
+import NotesPanel from './notes/NotesPanel.vue'
 import NativeCliPanel from './native-cli/NativeCliPanel.vue'
 import type { Locale } from './i18n'
 
@@ -45,6 +46,9 @@ const projectCollectionsAvailable = computed(() =>
 )
 const settingsAvailable = computed(() =>
   status.value?.capabilities.some(({ id, available }) => id === 'modelSettings' && available)
+)
+const noteLibraryAvailable = computed(() =>
+  status.value?.capabilities.some(({ id, available }) => id === 'noteLibrary' && available)
 )
 const nativeCliAvailable = computed(() =>
   status.value?.capabilities.some(({ id, available }) => id === 'nativeCli' && available)
@@ -140,7 +144,10 @@ onUnmounted(() => colorScheme.removeEventListener('change', onColorSchemeChange)
               <PhArchive aria-hidden="true" />{{ t('tauriPreview.legacyHistory.title') }}
             </a>
           </li>
-          <li><PhBookOpen aria-hidden="true" />{{ t('menu.notebooks') }}</li>
+          <li v-if="noteLibraryAvailable" class="navigation-link">
+            <a href="#notes"><PhBookOpen aria-hidden="true" />{{ t('menu.notebooks') }}</a>
+          </li>
+          <li v-else><PhBookOpen aria-hidden="true" />{{ t('menu.notebooks') }}</li>
           <li v-if="settingsAvailable" class="navigation-link">
             <a href="#model-settings">
               <PhGear aria-hidden="true" />{{ t('tauriPreview.modelSettings.title') }}
@@ -246,6 +253,7 @@ onUnmounted(() => colorScheme.removeEventListener('change', onColorSchemeChange)
         <AgentHistoryPanel v-if="chatHistoryAvailable" />
         <LegacyHistoryPanel v-if="legacyHistoryAvailable" />
         <ModelSettingsPanel v-if="settingsAvailable" />
+        <NotesPanel v-if="noteLibraryAvailable" />
         <NativeCliPanel v-if="nativeCliAvailable" />
 
         <UnrealPanel

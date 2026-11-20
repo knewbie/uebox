@@ -10,6 +10,7 @@ mod legacy_history;
     any(feature = "unreal", feature = "unity", feature = "godot")
 ))]
 mod native_cli;
+mod notes;
 mod profile_storage;
 mod project_collections;
 mod project_library;
@@ -35,7 +36,8 @@ pub fn configure_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> taur
         .manage(project_library::ProjectRegistrations::default())
         .manage(chat_history::ChatHistoryHost::default())
         .manage(legacy_history::LegacyHistoryHost::default())
-        .manage(settings::ModelSettings::default());
+        .manage(settings::ModelSettings::default())
+        .manage(notes::NotesHost::default());
     #[cfg(feature = "godot")]
     let builder = builder.manage(godot::GodotSessions::default());
     #[cfg(feature = "unity")]
@@ -85,6 +87,14 @@ pub fn configure_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> taur
         settings::remove_model_profile,
         settings::bind_model_profile,
         settings::transfer::import_model_profiles,
+        notes::list_notebooks,
+        notes::list_notes,
+        notes::get_note,
+        notes::save_notebook,
+        notes::save_note,
+        notes::remove_note,
+        notes::remove_notebook,
+        notes::transfer::import_legacy_notes,
         project_library::list_registered_projects,
         project_library::register_project,
         project_library::remove_registered_project,

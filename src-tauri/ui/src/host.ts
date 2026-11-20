@@ -10,6 +10,7 @@ export type CapabilityId =
   | 'legacyHistory'
   | 'modelSettings'
   | 'nativeCli'
+  | 'noteLibrary'
   | 'settings'
 
 export interface HostStatus {

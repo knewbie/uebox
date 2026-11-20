@@ -1,7 +1,8 @@
+import { publishTransferFile } from './publishTransferFile'
 import { Buffer } from 'node:buffer'
 import { createHash } from 'node:crypto'
 import { constants, type BigIntStats } from 'node:fs'
-import { link, lstat, mkdtemp, open, realpath, rm } from 'node:fs/promises'
+import { lstat, open, realpath } from 'node:fs/promises'
 import { basename, dirname, extname, isAbsolute, join, relative, sep } from 'node:path'
 import MarkdownIt from 'markdown-it'
 import { fileNameFor } from './chatSessionFiles'
@@ -411,23 +412,6 @@ function inSourceTree(source: string, parent: string): boolean {
   return !subpath || (!isAbsolute(subpath) && subpath !== '..' && !subpath.startsWith(`..${sep}`))
 }
 
-async function publish(parent: string, destination: string, content: string): Promise<void> {
-  const staging = await mkdtemp(join(parent, '.uebox-chat-export-'))
-  const stagedFile = join(staging, 'export.json')
-  try {
-    const file = await open(stagedFile, 'wx', 0o600)
-    try {
-      await file.writeFile(content, 'utf8')
-      await file.sync()
-    } finally {
-      await file.close()
-    }
-    await link(stagedFile, destination)
-  } finally {
-    await rm(staging, { recursive: true, force: true }).catch(() => undefined)
-  }
-}
-
 /** Call only after an explicit Save dialog. Both paths are supplied by the main process. */
 export async function exportVisibleChatHistory({
   historyDir,
@@ -463,7 +447,7 @@ export async function exportVisibleChatHistory({
   try {
     const parent = await realpath(dirname(destination))
     if (inSourceTree(source, parent)) return { success: false, code: 'chat_history_export_invalid' }
-    await publish(parent, join(parent, basename(destination)), document.content)
+    await publishTransferFile(join(parent, basename(destination)), document.content)
     return { success: true, code: 'chat_history_exported', count: document.count }
   } catch (error) {
     return {

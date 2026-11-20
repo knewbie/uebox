@@ -64,6 +64,7 @@ import type { DroppedPathVerdict } from '../shared/droppedPath'
 import type { ImportFailureReport, MissingPlugin, UnavailablePlugin } from '../shared/projectImport'
 import type { ProjectCoverMode } from '../shared/projectCover'
 import type { ChatHistoryExportResult } from '../shared/chatHistoryTransfer'
+import type { NoteTransferReply } from '../shared/noteTransfer'
 import type { PortableModelExportReply } from '../shared/modelProfileTransfer'
 import type { ProjectRegistrationExportResult } from '../shared/projectRegistration'
 import type { ProjectCollectionsExportResult } from '../shared/projectCollectionsTransfer'
@@ -2725,6 +2726,7 @@ declare global {
      * 本地存储知识库及来源数据
      */
     notebook: {
+      exportOfflineNotes: () => Promise<NoteTransferReply>
       /** 创建知识库 */
       create: (data: {
         title?: string

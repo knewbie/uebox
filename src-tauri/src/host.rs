@@ -56,6 +56,7 @@ pub fn read_host_status() -> HostStatus {
             "chatHistory",
             "legacyHistory",
             "nativeCli",
+            "noteLibrary",
         ]
         .into_iter()
         .map(|id| Capability {
@@ -72,6 +73,7 @@ pub fn read_host_status() -> HostStatus {
                         | "chatHistory"
                         | "legacyHistory"
                         | "modelSettings"
+                        | "noteLibrary"
                 ) && cfg!(any(unix, windows))),
         })
         .collect(),

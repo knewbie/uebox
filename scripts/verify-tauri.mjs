@@ -37,6 +37,7 @@ const crates = [
   'crates/uebox-legacy-history/Cargo.toml',
   'crates/uebox-credentials/Cargo.toml',
   'crates/uebox-cli/Cargo.toml',
+  'crates/uebox-notes/Cargo.toml',
   'src-tauri/Cargo.toml'
 ]
 

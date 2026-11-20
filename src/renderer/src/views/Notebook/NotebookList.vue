@@ -43,13 +43,45 @@ interface Notebook {
   role: 'Owner' | 'Editor' | 'Viewer'
 }
 
+const exportingNotes = ref(false)
+
+function confirmExportNotes(): void {
+  confirmDialog({
+    title: t('tauriPreview.notes.exportTitle'),
+    content: t('tauriPreview.notes.exportDetail'),
+    onOk: async () => {
+      if (exportingNotes.value) return
+      exportingNotes.value = true
+      try {
+        const result = await window.api.notebook.exportOfflineNotes()
+        if (result.success) {
+          message.success(
+            t('tauriPreview.notes.exported', { count: result.count, skipped: result.skipped })
+          )
+        } else if (result.code !== 'cancelled') {
+          message.error(
+            t(
+              result.code === 'exists'
+                ? 'tauriPreview.notes.exportExists'
+                : 'tauriPreview.notes.exportFailed'
+            )
+          )
+        }
+      } catch {
+        message.error(t('tauriPreview.notes.exportFailed'))
+      } finally {
+        exportingNotes.value = false
+      }
+    }
+  })
+}
+
 const notebooks = ref<Notebook[]>([])
 const loading = ref(true)
 const initialLoading = useInitialLoading(
   () => loading.value,
   () => notebooks.value.length > 0
 )
-const activeCategory = ref('all')
 const viewMode = ref<'grid' | 'list'>('grid')
 const sortType = ref(['recent'])
 
@@ -404,6 +436,9 @@ onActivated(() => {
         <!-- 岛屿 B: 次要操作。导入分享码只有云端才有意义，社区版整块不渲染 -->
 
         <!-- 岛屿 C: 核心操作 -->
+        <AppButton variant="soft" :disabled="exportingNotes" @click="confirmExportNotes">
+          {{ t('tauriPreview.notes.exportTitle') }}
+        </AppButton>
         <AppButton variant="primary" @click="handleCreateNotebook">
           <template #icon>
             <svg
