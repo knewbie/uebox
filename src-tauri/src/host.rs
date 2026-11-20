@@ -50,6 +50,7 @@ pub fn read_host_status() -> HostStatus {
             "agent",
             "libraries",
             "settings",
+            "modelSettings",
             "projectRegistration",
             "chatHistory",
             "legacyHistory",
@@ -57,8 +58,10 @@ pub fn read_host_status() -> HostStatus {
         .into_iter()
         .map(|id| Capability {
             id,
-            available: matches!(id, "projectRegistration" | "chatHistory" | "legacyHistory")
-                && cfg!(any(unix, windows)),
+            available: matches!(
+                id,
+                "projectRegistration" | "chatHistory" | "legacyHistory" | "modelSettings"
+            ) && cfg!(any(unix, windows)),
         })
         .collect(),
     }

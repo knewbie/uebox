@@ -20,6 +20,7 @@ export function createAppI18n(locale: Locale = savedLocale()): ReturnType<typeof
     messages: {
       'zh-CN': {
         menu: existingZhCN.menu,
+        aiProvider: { roles: existingZhCN.aiProvider.roles },
         profile: {
           appearance: {
             languageZhCN: existingZhCN.profile.appearance.languageZhCN,
@@ -30,6 +31,7 @@ export function createAppI18n(locale: Locale = savedLocale()): ReturnType<typeof
       },
       'en-US': {
         menu: existingEnUS.menu,
+        aiProvider: { roles: existingEnUS.aiProvider.roles },
         profile: {
           appearance: {
             languageZhCN: existingEnUS.profile.appearance.languageZhCN,

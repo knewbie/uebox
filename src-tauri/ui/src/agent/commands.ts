@@ -28,6 +28,13 @@ export function createAgent(
 ): Promise<{ agentId: string }> {
   return invoke(`create_${engine}_agent`, { ...target, endpoint, model, credential })
 }
+export function createAgentFromProfile(
+  engine: AgentEngine,
+  target: AgentTarget,
+  profileId: string | null
+): Promise<{ agentId: string }> {
+  return invoke(`create_${engine}_agent_from_profile`, { ...target, profileId })
+}
 export function startAgent(
   engine: AgentEngine,
   agentId: string,

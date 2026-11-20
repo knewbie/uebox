@@ -1,14 +1,13 @@
 //! One explicitly authorized socket per Unity target. Agent runs never reconnect.
 use crate::chat_history::{finish_recorded_run, start_recorded_run};
+use crate::settings::{AgentModel, AgentModelSource};
 use crate::unity::{local_target, UnityQueries};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 use tauri::{Manager, Runtime};
-use uebox_agent_core::{
-    AgentSession, Cancellation, Error, ModelEvent, OpenAiProvider, ProviderConfig,
-};
+use uebox_agent_core::{AgentSession, Cancellation, Error, ModelEvent};
 use uebox_agent_unity_tools::{ProbeState, UnityTools};
 use uebox_engine_core::{
     ConnectionToken, EngineKind, EngineRegistry, InteractionMode, ProjectIdentity,
@@ -359,9 +358,31 @@ pub(crate) async fn create_unity_agent<R: Runtime>(
     endpoint: String,
     model: String,
     credential: Option<String>,
-    queries: tauri::State<'_, UnityQueries>,
 ) -> Result<CreatedAgent, String> {
-    let host = Arc::clone(&queries.agent);
+    let source = AgentModelSource::Direct {
+        endpoint,
+        model,
+        credential,
+    };
+    create_unity_with_model(window, session_id, source).await
+}
+
+#[tauri::command]
+pub(crate) async fn create_unity_agent_from_profile<R: Runtime>(
+    window: tauri::WebviewWindow<R>,
+    session_id: String,
+    profile_id: Option<String>,
+) -> Result<CreatedAgent, String> {
+    let source = AgentModelSource::Saved { profile_id };
+    create_unity_with_model(window, session_id, source).await
+}
+
+async fn create_unity_with_model<R: Runtime>(
+    window: tauri::WebviewWindow<R>,
+    session_id: String,
+    source: AgentModelSource,
+) -> Result<CreatedAgent, String> {
+    let host = Arc::clone(&window.state::<UnityQueries>().agent);
     let owner = window.label().to_owned();
     let tools = {
         let state = lock(&host.state);
@@ -374,26 +395,12 @@ pub(crate) async fn create_unity_agent<R: Runtime>(
             .clone()
     };
     let agent_id = id()?;
-    let credential = Arc::new(Mutex::new(credential.filter(|value| !value.is_empty())));
-    let token_slot = credential.clone();
-    let required = lock(&token_slot).is_some();
-    let provider = OpenAiProvider::new(
-        ProviderConfig::new(endpoint, model)
-            .with_max_output_tokens(1024)
-            .with_max_request_bytes(1024 * 1024)
-            .with_token_provider(move || {
-                let token = token_slot
-                    .lock()
-                    .map_err(|_| Error::CredentialUnavailable)?
-                    .clone();
-                if required && token.is_none() {
-                    Err(Error::CredentialUnavailable)
-                } else {
-                    Ok(token)
-                }
-            }),
-    )
-    .map_err(error_code)?;
+    let AgentModel {
+        provider,
+        credential,
+    } = source
+        .resolve(window.app_handle().clone(), error_code)
+        .await?;
     let session = AgentSession::new_with_system_prompt(
         provider,
         tools.tool_registry().map_err(error_code)?,

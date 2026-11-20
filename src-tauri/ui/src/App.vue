@@ -19,6 +19,7 @@ import GodotPanel from './engines/godot/GodotPanel.vue'
 import ProjectLibraryPanel from './projects/ProjectLibraryPanel.vue'
 import AgentHistoryPanel from './history/AgentHistoryPanel.vue'
 import LegacyHistoryPanel from './legacy-history/LegacyHistoryPanel.vue'
+import ModelSettingsPanel from './settings/ModelSettingsPanel.vue'
 import type { Locale } from './i18n'
 
 type ThemePreference = 'system' | 'light' | 'dark'
@@ -36,6 +37,9 @@ const chatHistoryAvailable = computed(() =>
 )
 const legacyHistoryAvailable = computed(() =>
   status.value?.capabilities.some(({ id, available }) => id === 'legacyHistory' && available)
+)
+const settingsAvailable = computed(() =>
+  status.value?.capabilities.some(({ id, available }) => id === 'modelSettings' && available)
 )
 function readTheme(): ThemePreference {
   try {
@@ -129,7 +133,12 @@ onUnmounted(() => colorScheme.removeEventListener('change', onColorSchemeChange)
             </a>
           </li>
           <li><PhBookOpen aria-hidden="true" />{{ t('menu.notebooks') }}</li>
-          <li><PhGear aria-hidden="true" />{{ t('tauriPreview.capabilities.settings') }}</li>
+          <li v-if="settingsAvailable" class="navigation-link">
+            <a href="#model-settings">
+              <PhGear aria-hidden="true" />{{ t('tauriPreview.modelSettings.title') }}
+            </a>
+          </li>
+          <li v-else><PhGear aria-hidden="true" />{{ t('tauriPreview.capabilities.settings') }}</li>
         </ul>
       </nav>
       <p class="sidebar__notice">{{ t('tauriPreview.unavailable') }}</p>
@@ -220,6 +229,7 @@ onUnmounted(() => colorScheme.removeEventListener('change', onColorSchemeChange)
         <ProjectLibraryPanel v-if="projectRegistrationAvailable" />
         <AgentHistoryPanel v-if="chatHistoryAvailable" />
         <LegacyHistoryPanel v-if="legacyHistoryAvailable" />
+        <ModelSettingsPanel v-if="settingsAvailable" />
 
         <UnrealPanel
           v-if="!status || status.engineModules?.unreal === true"

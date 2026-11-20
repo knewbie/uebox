@@ -64,6 +64,7 @@ import type { DroppedPathVerdict } from '../shared/droppedPath'
 import type { ImportFailureReport, MissingPlugin, UnavailablePlugin } from '../shared/projectImport'
 import type { ProjectCoverMode } from '../shared/projectCover'
 import type { ChatHistoryExportResult } from '../shared/chatHistoryTransfer'
+import type { PortableModelExportReply } from '../shared/modelProfileTransfer'
 import type { ProjectRegistrationExportResult } from '../shared/projectRegistration'
 import type { SpotlightAction, SpotlightSearchResponse } from '../shared/spotlight'
 import type { NotebookContextLevel } from '../shared/notebookContext'
@@ -2180,6 +2181,7 @@ declare global {
       onChunk: (callback: (chunk: import('../shared/speech').SpeechChunk) => void) => () => void
     }
     aiProvider: {
+      exportModelProfiles: () => Promise<PortableModelExportReply>
       catalog: () => Promise<import('../shared/aiProvider').CatalogEntry[]>
       getSettings: () => Promise<import('../shared/aiProvider').SettingsView>
       saveProvider: (

@@ -23,6 +23,7 @@ export default {
       agent: 'AI 助手',
       libraries: '项目库与资料库',
       settings: '应用设置',
+      modelSettings: '模型设置',
       projectRegistration: '项目登记',
       chatHistory: '对话历史',
       legacyHistory: '旧版对话归档'
@@ -127,7 +128,8 @@ export default {
       confirmImport: '确认导入',
       clearFile: '取消选择',
       importing: '正在导入归档…',
-      imported: '已导入 {inserted} 条；已存在 {alreadyImported} 条；内嵌附件 {embeddedAttachments} 个；不可用附件 {unavailableAttachments} 个。',
+      imported:
+        '已导入 {inserted} 条；已存在 {alreadyImported} 条；内嵌附件 {embeddedAttachments} 个；不可用附件 {unavailableAttachments} 个。',
       errors: {
         tooLarge: '归档文件超过 16 MiB 上限。',
         invalidUtf8: '归档文件必须使用有效的 UTF-8 编码。',
@@ -164,6 +166,54 @@ export default {
         imageError: '无法显示此图片，请重试。',
         retryImage: '重试图片',
         imageAlt: '归档图片'
+      }
+    },
+    modelSettings: {
+      title: '模型设置',
+      open: '打开模型设置',
+      close: '关闭模型设置',
+      cleanupPending: '模型配置已保存，但未能从系统存储移除旧凭据。',
+      needsAuthorization: '需要重新授权',
+      edit: '编辑',
+      remove: '移除模型配置',
+      empty: '暂无已保存的模型。',
+      confirmRemove: '移除「{title}」及其已保存凭据？',
+      cancel: '取消',
+      name: '配置名称',
+      endpoint: '完整 Chat Completions 地址',
+      model: '模型 ID',
+      authorization: '授权方式',
+      bearer: 'Bearer 凭据',
+      environment: '环境变量名称',
+      save: '保存模型',
+      purpose: '模型用途',
+      binding: '此用途的默认模型',
+      unassigned: '未分配',
+      importFile: '桌面客户端导出的模型配置',
+      import: '导入模型配置',
+      imported:
+        '已导入 {inserted} 条，已有 {alreadyImported} 条，{needsAuthorization} 条需要重新授权。',
+      mode: '模型来源',
+      direct: '填写接口地址和模型',
+      saved: '使用已保存的模型',
+      defaultModel: '使用助手默认模型',
+      auth: {
+        keep: '沿用当前授权',
+        none: '无需凭据',
+        keychain: '保存到系统凭据存储',
+        environment: '使用环境变量'
+      },
+      errors: {
+        generic: '无法更新模型设置。',
+        settings_invalid: '模型配置或设置文件无效。',
+        settings_locked: '模型设置正在使用，请重试。',
+        credential_reauthorization_required: '使用模型前，需为此地址重新授权。',
+        credential_invalid_secret: '凭据为空或无效。',
+        credential_unavailable: '系统凭据存储或所需凭据不可用。',
+        credential_access_denied: '系统拒绝访问凭据存储。',
+        model_profile_import_invalid: '选择的模型配置文件无效。',
+        model_profile_import_limit: '请选择不超过 512 KiB 的模型配置文件。',
+        model_profile_import_version: '不支持此模型配置的格式或版本。'
       }
     },
     editorAgent: {
@@ -215,6 +265,12 @@ export default {
         chat_history_recovery_required: '对话历史数据库需要恢复。',
         chat_history_locked: '另一个应用窗口或进程正在使用对话历史。',
         chat_history_invalid: '对话历史数据库无效或使用了不受支持的格式。',
+        model_profile_not_found: '请选择已保存的模型，或在模型设置中绑定助手默认模型。',
+        settings_unavailable: '模型设置当前不可用。',
+        settings_locked: '模型设置正在使用，请重试。',
+        credential_reauthorization_required: '请在模型设置中为此模型重新授权。',
+        credential_invalid_secret: '配置的凭据无效。',
+        credential_access_denied: '系统拒绝访问凭据存储。',
         generic: '操作失败，请检查 {engine} 连接和模型配置。'
       }
     },
@@ -754,6 +810,18 @@ export default {
     }
   },
   aiProvider: {
+    profileTransfer: {
+      export: '导出模型配置…',
+      exported: '已导出 {count} 项配置，有 {unsupported} 个模型暂不支持。',
+      errors: {
+        model_profile_export_busy: '正在导出模型配置。',
+        model_profile_export_invalid: '旧版模型设置或目标位置无效。',
+        model_profile_export_unsupported_version: '不支持此旧版设置文件版本。',
+        model_profile_export_too_large: '旧版设置超过导出限制。',
+        model_profile_export_unavailable: '无法导出模型配置。',
+        model_profile_export_exists: '选择的位置已有文件。'
+      }
+    },
     title: '服务商',
     banner: {
       notConfigured: '添加服务商，并选择「主模型」后即可使用 AI。',

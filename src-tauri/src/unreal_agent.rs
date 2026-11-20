@@ -1,5 +1,6 @@
 //! Fixed-target Unreal Agent sessions on the existing listener.
 use crate::chat_history::{finish_recorded_run, start_recorded_run};
+use crate::settings::{AgentModel, AgentModelSource};
 use crate::unreal::UnrealListenerState;
 use crate::unreal_actor_tool::add_actor_tool;
 use crate::unreal_approval::{ApprovalBook, Proposal, Receipt};
@@ -11,9 +12,7 @@ use std::{
     time::Duration,
 };
 use tauri::{Manager, Runtime, WebviewWindow};
-use uebox_agent_core::{
-    AgentSession, Cancellation, Error, ModelEvent, OpenAiProvider, ProviderConfig,
-};
+use uebox_agent_core::{AgentSession, Cancellation, Error, ModelEvent};
 use uebox_agent_engine_tools::unreal::{UnrealCandidate, UnrealProjectInfoBinding};
 use uebox_engine_core::{EngineKind, EngineRegistry, InteractionMode, ProjectIdentity};
 use uebox_engine_unreal::{SocketKey, UnrealBridge};
@@ -45,8 +44,7 @@ impl UnrealAgentHost {
 }
 
 struct ModelAccess {
-    provider: OpenAiProvider,
-    credential: Arc<Mutex<Option<String>>>,
+    model: AgentModel,
     allow_actor_label_changes: bool,
 }
 
@@ -227,7 +225,7 @@ impl UnrealAgentHost {
                 "You are a read-only assistant for the selected Unreal editor. Use only the supplied read-only tool. Do not claim to change the project."
             };
             let session = AgentSession::new_with_system_prompt(
-                access.provider,
+                access.model.provider,
                 tools,
                 binding.target_validator(),
                 6,
@@ -263,7 +261,7 @@ impl UnrealAgentHost {
                     candidate,
                     binding,
                     session,
-                    credential: access.credential,
+                    credential: access.model.credential,
                     monitor,
                 }),
                 run: None,
@@ -349,6 +347,47 @@ pub(crate) async fn create_unreal_agent<R: Runtime>(
     credential: Option<String>,
     allow_actor_label_changes: Option<bool>,
 ) -> Result<CreatedAgent, String> {
+    let source = AgentModelSource::Direct {
+        endpoint,
+        model,
+        credential,
+    };
+    create_unreal_with_model(
+        window,
+        connection_id,
+        project_root,
+        source,
+        allow_actor_label_changes,
+    )
+    .await
+}
+
+#[tauri::command]
+pub(crate) async fn create_unreal_agent_from_profile<R: Runtime>(
+    window: WebviewWindow<R>,
+    connection_id: String,
+    project_root: String,
+    profile_id: Option<String>,
+    allow_actor_label_changes: Option<bool>,
+) -> Result<CreatedAgent, String> {
+    let source = AgentModelSource::Saved { profile_id };
+    create_unreal_with_model(
+        window,
+        connection_id,
+        project_root,
+        source,
+        allow_actor_label_changes,
+    )
+    .await
+}
+
+async fn create_unreal_with_model<R: Runtime>(
+    window: WebviewWindow<R>,
+    connection_id: String,
+    project_root: String,
+    source: AgentModelSource,
+    allow_actor_label_changes: Option<bool>,
+) -> Result<CreatedAgent, String> {
     let state = window.state::<UnrealListenerState>();
     let root = PathBuf::from(project_root);
     if !root.is_absolute() {
@@ -367,24 +406,9 @@ pub(crate) async fn create_unreal_agent<R: Runtime>(
     })
     .await
     .map_err(|_| "agent_worker_error")??;
-    let credential = Arc::new(Mutex::new(credential.filter(|value| !value.is_empty())));
-    let required = lock(&credential).is_some();
-    let token_slot = Arc::clone(&credential);
-    let config = ProviderConfig::new(endpoint, model)
-        .with_max_output_tokens(1024)
-        .with_max_request_bytes(1024 * 1024)
-        .with_token_provider(move || {
-            let token = token_slot
-                .lock()
-                .map_err(|_| Error::CredentialUnavailable)?
-                .clone();
-            if required && token.is_none() {
-                Err(Error::CredentialUnavailable)
-            } else {
-                Ok(token)
-            }
-        });
-    let provider = OpenAiProvider::new(config).map_err(error_code)?;
+    let model = source
+        .resolve(window.app_handle().clone(), error_code)
+        .await?;
     let listener = state.bridge.lock().await;
     state.agents.create(
         window.label().to_owned(),
@@ -392,8 +416,7 @@ pub(crate) async fn create_unreal_agent<R: Runtime>(
         &connection_id,
         project,
         ModelAccess {
-            provider,
-            credential,
+            model,
             allow_actor_label_changes: allow_actor_label_changes == Some(true),
         },
     )

@@ -4452,6 +4452,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "uebox-credentials"
+version = "0.1.0"
+dependencies = [
+ "core-foundation",
+ "windows-sys 0.61.2",
+ "zeroize",
+]
+
+[[package]]
 name = "uebox-engine-core"
 version = "0.1.0"
 
@@ -4520,6 +4529,7 @@ dependencies = [
  "getrandom 0.2.17",
  "serde",
  "serde_json",
+ "sha2 0.11.1",
  "tauri",
  "tauri-build",
  "tempfile",
@@ -4530,12 +4540,14 @@ dependencies = [
  "uebox-agent-godot-tools",
  "uebox-agent-unity-tools",
  "uebox-chat-history",
+ "uebox-credentials",
  "uebox-engine-core",
  "uebox-engine-unity",
  "uebox-engine-unreal",
  "uebox-godot-session",
  "uebox-legacy-history",
  "uebox-project-library",
+ "url",
 ]
 
 [[package]]

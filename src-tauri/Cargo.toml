@@ -28,6 +28,7 @@ base64 = "0.22"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri = { version = "2", features = [] }
+uebox-credentials = { path = "../crates/uebox-credentials" }
 uebox-chat-history = { path = "../crates/uebox-chat-history" }
 uebox-legacy-history = { path = "../crates/uebox-legacy-history" }
 uebox-project-library = { path = "../crates/uebox-project-library" }
@@ -39,20 +40,22 @@ uebox-agent-core = { path = "../crates/uebox-agent-core", optional = true }
 uebox-agent-engine-tools = { path = "../crates/uebox-agent-engine-tools", optional = true, default-features = false }
 uebox-agent-unity-tools = { path = "../crates/uebox-agent-unity-tools", optional = true }
 uebox-agent-godot-tools = { path = "../crates/uebox-agent-godot-tools", optional = true }
-getrandom = { version = "0.2", optional = true }
+getrandom = "0.2"
+sha2 = "0.11"
+url = "2"
+tempfile = "3"
 tokio = { version = "1", features = ["rt", "time"], optional = true }
 
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }
-tempfile = "3"
 futures-util = { version = "0.3", features = ["sink"] }
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "sync", "time"] }
 tokio-tungstenite = "0.26"
 
 [features]
 default = ["unity", "unreal", "godot"]
-unity = ["dep:uebox-engine-unity", "dep:uebox-engine-core", "dep:uebox-agent-core", "dep:uebox-agent-unity-tools", "dep:getrandom", "dep:tokio"]
-unreal = ["dep:uebox-engine-unreal", "dep:uebox-engine-core", "dep:uebox-agent-core", "uebox-agent-engine-tools/unreal", "dep:getrandom", "dep:tokio"]
-godot = ["dep:uebox-godot-session", "dep:uebox-engine-core", "dep:uebox-agent-core", "dep:uebox-agent-godot-tools", "dep:getrandom", "dep:tokio"]
+unity = ["dep:uebox-engine-unity", "dep:uebox-engine-core", "dep:uebox-agent-core", "dep:uebox-agent-unity-tools", "dep:tokio"]
+unreal = ["dep:uebox-engine-unreal", "dep:uebox-engine-core", "dep:uebox-agent-core", "uebox-agent-engine-tools/unreal", "dep:tokio"]
+godot = ["dep:uebox-godot-session", "dep:uebox-engine-core", "dep:uebox-agent-core", "dep:uebox-agent-godot-tools", "dep:tokio"]
 godot-real-editor-test = ["godot"]
 custom-protocol = ["tauri/custom-protocol"]

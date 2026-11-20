@@ -1,14 +1,15 @@
 //! Fixed-target, read-only Godot Agent preview. Nothing here discovers editors.
 use crate::chat_history::{finish_recorded_run, start_recorded_run};
 use crate::godot::{GodotSessions, SessionHandle};
+use crate::settings::{AgentModel, AgentModelSource};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 use tauri::{Manager, Runtime};
 use uebox_agent_core::{
-    AgentSession, Cancellation, Engine, Error, ModelEvent, OpenAiProvider, ProviderConfig,
-    ReadOnlyTool, RunTarget, ToolDefinition, ToolFuture, ToolRegistry,
+    AgentSession, Cancellation, Engine, Error, ModelEvent, ReadOnlyTool, RunTarget, ToolDefinition,
+    ToolFuture, ToolRegistry,
 };
 use uebox_agent_godot_tools::GodotToolBinding;
 use uebox_engine_core::{
@@ -283,10 +284,33 @@ pub(crate) async fn create_godot_agent<R: Runtime>(
     endpoint: String,
     model: String,
     credential: Option<String>,
-    sessions: tauri::State<'_, GodotSessions>,
+) -> Result<CreatedAgent, String> {
+    let source = AgentModelSource::Direct {
+        endpoint,
+        model,
+        credential,
+    };
+    create_godot_with_model(window, session_id, source).await
+}
+
+#[tauri::command]
+pub(crate) async fn create_godot_agent_from_profile<R: Runtime>(
+    window: tauri::WebviewWindow<R>,
+    session_id: String,
+    profile_id: Option<String>,
+) -> Result<CreatedAgent, String> {
+    let source = AgentModelSource::Saved { profile_id };
+    create_godot_with_model(window, session_id, source).await
+}
+
+async fn create_godot_with_model<R: Runtime>(
+    window: tauri::WebviewWindow<R>,
+    session_id: String,
+    source: AgentModelSource,
 ) -> Result<CreatedAgent, String> {
     let owner = window.label().to_owned();
-    let host = Arc::clone(&sessions.agent);
+    let host = Arc::clone(&window.state::<GodotSessions>().agent);
+    let app = window.app_handle().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let target = {
             let state = host.state.lock().unwrap_or_else(|e| e.into_inner());
@@ -304,15 +328,7 @@ pub(crate) async fn create_godot_agent<R: Runtime>(
                 return Err("target_unavailable".into());
             }
         };
-        let secret = Arc::new(Mutex::new(credential.filter(|s| !s.is_empty())));
-        let required = secret.lock().unwrap_or_else(|e| e.into_inner()).is_some();
-        let token_slot = Arc::clone(&secret);
-        let config = ProviderConfig::new(endpoint, model).with_max_output_tokens(1024).with_max_request_bytes(1024 * 1024)
-            .with_token_provider(move || {
-                let token = token_slot.lock().map_err(|_| Error::CredentialUnavailable)?.clone();
-                if required && token.is_none() { Err(Error::CredentialUnavailable) } else { Ok(token) }
-            });
-        let provider = OpenAiProvider::new(config).map_err(error_code)?;
+        let AgentModel { provider, credential } = source.resolve_in_worker(&app, error_code)?;
         let mut registry = ToolRegistry::new(binding.target());
         let schema = serde_json::json!({"type":"object","properties":{},"additionalProperties":false});
         for (name, description, inner) in [
@@ -336,7 +352,7 @@ pub(crate) async fn create_godot_agent<R: Runtime>(
         if state.agents.values().any(|agent| agent.target_id == session_id) { return Err("agent_already_exists".into()); }
         let mut agent_id = id()?;
         while state.agents.contains_key(&agent_id) { agent_id = id()?; }
-        state.agents.insert(agent_id.clone(), Agent { owner, target_id: session_id, session: Some(Arc::new(session)), credential: secret, run: None, retired: false, closed: false });
+        state.agents.insert(agent_id.clone(), Agent { owner, target_id: session_id, session: Some(Arc::new(session)), credential, run: None, retired: false, closed: false });
         Ok(CreatedAgent { agent_id })
     }).await.map_err(|_| "agent_worker_error".to_string())?
 }
@@ -604,6 +620,7 @@ pub(crate) fn close_godot_agent<R: Runtime>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uebox_agent_core::{OpenAiProvider, ProviderConfig};
 
     #[test]
     fn output_backpressure_cancels_and_reports_a_real_limit_error() {

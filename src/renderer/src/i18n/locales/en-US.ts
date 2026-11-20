@@ -24,6 +24,7 @@ export default {
       agent: 'AI assistant',
       libraries: 'Project and content libraries',
       settings: 'Application settings',
+      modelSettings: 'Model settings',
       projectRegistration: 'Project registration',
       chatHistory: 'Chat history',
       legacyHistory: 'Legacy chat archive'
@@ -131,7 +132,8 @@ export default {
       confirmImport: 'Confirm import',
       clearFile: 'Cancel selection',
       importing: 'Importing archive…',
-      imported: '{inserted} imported; {alreadyImported} already imported; {embeddedAttachments} embedded attachments; {unavailableAttachments} unavailable attachments.',
+      imported:
+        '{inserted} imported; {alreadyImported} already imported; {embeddedAttachments} embedded attachments; {unavailableAttachments} unavailable attachments.',
       errors: {
         tooLarge: 'The archive exceeds the 16 MiB limit.',
         invalidUtf8: 'The archive must use valid UTF-8 encoding.',
@@ -168,6 +170,56 @@ export default {
         imageError: 'Unable to display this image. Try again.',
         retryImage: 'Retry image',
         imageAlt: 'Archived image'
+      }
+    },
+    modelSettings: {
+      title: 'Model settings',
+      open: 'Open model settings',
+      close: 'Close model settings',
+      cleanupPending:
+        'The profile was saved but an old credential could not be removed from the system store.',
+      needsAuthorization: 'Authorization required',
+      edit: 'Edit',
+      remove: 'Remove profile',
+      empty: 'No saved models.',
+      confirmRemove: 'Remove {title} and its saved credential?',
+      cancel: 'Cancel',
+      name: 'Profile name',
+      endpoint: 'Full Chat Completions URL',
+      model: 'Model ID',
+      authorization: 'Authorization',
+      bearer: 'Bearer credential',
+      environment: 'Environment variable name',
+      save: 'Save model',
+      purpose: 'Model purpose',
+      binding: 'Default model for this purpose',
+      unassigned: 'Unassigned',
+      importFile: 'Model profiles exported from the desktop app',
+      import: 'Import model profiles',
+      imported:
+        '{inserted} imported, {alreadyImported} already registered, {needsAuthorization} require authorization.',
+      mode: 'Model source',
+      direct: 'Enter an endpoint and model',
+      saved: 'Use a saved model',
+      defaultModel: 'Use the Agent default',
+      auth: {
+        keep: 'Keep current authorization',
+        none: 'No credential',
+        keychain: 'Store in the system credential store',
+        environment: 'Use an environment variable'
+      },
+      errors: {
+        generic: 'Unable to update model settings.',
+        settings_invalid: 'The settings or model profile are invalid.',
+        settings_locked: 'Model settings are busy. Try again.',
+        credential_reauthorization_required: 'Authorize this endpoint before using the model.',
+        credential_invalid_secret: 'The credential is empty or invalid.',
+        credential_unavailable:
+          'The system credential store or required credential is unavailable.',
+        credential_access_denied: 'Access to the system credential store was denied.',
+        model_profile_import_invalid: 'The selected configuration is invalid.',
+        model_profile_import_limit: 'Select a model profile archive up to 512 KiB.',
+        model_profile_import_version: 'The configuration format or version is unsupported.'
       }
     },
     editorAgent: {
@@ -220,6 +272,12 @@ export default {
         chat_history_recovery_required: 'The history database needs recovery.',
         chat_history_locked: 'Another application window or process is using this history.',
         chat_history_invalid: 'The history database is invalid or uses an unsupported format.',
+        model_profile_not_found: 'Select a saved model or bind an Agent default in Model settings.',
+        settings_unavailable: 'Model settings are unavailable.',
+        settings_locked: 'Model settings are busy. Try again.',
+        credential_reauthorization_required: 'Authorize this saved model in Model settings.',
+        credential_invalid_secret: 'The configured credential is invalid.',
+        credential_access_denied: 'Access to the system credential store was denied.',
         generic: 'The operation failed. Check the {engine} connection and model configuration.'
       }
     },
@@ -756,6 +814,19 @@ First work out why the install failed from the output above. If you can run comm
     }
   },
   aiProvider: {
+    profileTransfer: {
+      export: 'Export model profiles…',
+      exported: '{count} profiles exported. {unsupported} unsupported models were skipped.',
+      errors: {
+        model_profile_export_busy: 'A model profile export is already in progress.',
+        model_profile_export_invalid: 'The legacy model settings or destination are invalid.',
+        model_profile_export_unsupported_version:
+          'The legacy settings file version is unsupported.',
+        model_profile_export_too_large: 'The legacy settings exceed the export limits.',
+        model_profile_export_unavailable: 'Unable to export model profiles.',
+        model_profile_export_exists: 'A file already exists at the selected location.'
+      }
+    },
     title: 'Providers',
     banner: {
       notConfigured: 'Add a provider and select a Main model to use AI.',

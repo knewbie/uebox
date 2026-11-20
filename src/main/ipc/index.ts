@@ -19,6 +19,7 @@ import { registerAIGCIPC } from './aigc'
 import { registerNamingRulesIPC } from './namingRules'
 import { registerAiIPC } from './ai'
 import { registerAiProviderIPC } from '../ai/ipc'
+import { registerModelProfileExportIPC } from '../ai/modelProfileExportIpc'
 import { registerDashScopeIPC } from './dashscope'
 import { registerVisionIPC } from './vision'
 import { registerAttachmentIPC } from './attachment'
@@ -108,6 +109,7 @@ export function registerAllIPC(setAppIconTheme: SetAppIconTheme): void {
 
   // 注册本地直连 Provider 配置相关 IPC
   registerAiProviderIPC()
+  registerModelProfileExportIPC()
 
   // 注册阿里云百炼 DashScope 相关 IPC（文件上传等）
   registerDashScopeIPC()

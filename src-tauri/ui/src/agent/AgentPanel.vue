@@ -5,10 +5,12 @@ import AInput from 'ant-design-vue/es/input/Input'
 import ATextarea from 'ant-design-vue/es/input/TextArea'
 import AppAlert from '@renderer/components/AppAlert.vue'
 import AppButton from '@renderer/components/AppButton.vue'
+import { getModelSettings, type ModelCatalog } from '../settings/commands'
 import {
   cancelAgent,
   closeAgent,
   createAgent,
+  createAgentFromProfile,
   pollAgent,
   startAgent,
   type AgentEngine,
@@ -28,6 +30,9 @@ const { t } = useI18n()
 const endpoint = ref('')
 const model = ref('')
 const credential = ref('')
+const modelSource = ref<'direct' | 'saved'>('direct')
+const modelCatalog = ref<ModelCatalog | null>(null)
+const selectedProfile = ref('')
 const saveHistory = ref(false)
 const message = ref('')
 const agentId = ref<string | null>(null)
@@ -57,8 +62,13 @@ const canCreate = computed(
     props.target &&
     !agentId.value &&
     !busy.value &&
-    Boolean(endpoint.value.trim()) &&
-    Boolean(model.value.trim())
+    (modelSource.value === 'saved'
+      ? Boolean(
+          selectedProfile.value ||
+            modelCatalog.value?.bindings.agent ||
+            modelCatalog.value?.bindings.chat
+        )
+      : Boolean(endpoint.value.trim() && model.value.trim()))
 )
 const canSend = computed(
   () =>
@@ -90,7 +100,13 @@ const knownErrors = new Set([
   'chat_history_active_turn',
   'chat_history_recovery_required',
   'chat_history_locked',
-  'chat_history_invalid'
+  'chat_history_invalid',
+  'model_profile_not_found',
+  'settings_unavailable',
+  'settings_locked',
+  'credential_reauthorization_required',
+  'credential_invalid_secret',
+  'credential_access_denied'
 ])
 function displayError(cause: unknown): void {
   const code = typeof cause === 'string' && knownErrors.has(cause) ? cause : 'generic'
@@ -109,6 +125,9 @@ function reset(): void {
   cancelled.value = false
   unavailable.value = false
   credential.value = ''
+  modelSource.value = 'direct'
+  selectedProfile.value = ''
+  modelCatalog.value = null
   saveHistory.value = false
   message.value = ''
   messages.value = []
@@ -118,6 +137,26 @@ function reset(): void {
 watch(() => props.target, reset, { flush: 'sync' })
 watch(agentId, (id) => emit('agentChanged', id), { flush: 'sync' })
 onUnmounted(reset)
+
+async function selectModelSource(event: Event): Promise<void> {
+  const selected = (event.target as HTMLSelectElement).value
+  modelSource.value = selected === 'saved' ? 'saved' : 'direct'
+  selectedProfile.value = ''
+  modelCatalog.value = null
+  credential.value = ''
+  error.value = null
+  if (modelSource.value === 'direct') return
+  const current = epoch
+  busy.value = true
+  try {
+    const catalog = await getModelSettings()
+    if (current === epoch) modelCatalog.value = catalog
+  } catch (cause) {
+    if (current === epoch) displayError(cause)
+  } finally {
+    if (current === epoch) busy.value = false
+  }
+}
 
 async function configure(): Promise<void> {
   if (!canCreate.value) return
@@ -130,13 +169,10 @@ async function configure(): Promise<void> {
   busy.value = true
   error.value = null
   try {
-    const result = await createAgent(
-      engine,
-      target,
-      endpoint.value.trim(),
-      model.value.trim(),
-      secret
-    )
+    const result =
+      modelSource.value === 'saved'
+        ? await createAgentFromProfile(engine, target, selectedProfile.value || null)
+        : await createAgent(engine, target, endpoint.value.trim(), model.value.trim(), secret)
     if (current !== epoch || props.target !== target) {
       void closeAgent(engine, result.agentId).catch(() => {})
       return
@@ -245,31 +281,65 @@ async function cancel(): Promise<void> {
       {{ t('tauriPreview.editorAgent.unavailable', { engine: engineName }) }}
     </p>
     <form class="agent-form" @submit.prevent="configure">
-      <label :for="`${controlId}-endpoint`">{{ t('tauriPreview.editorAgent.endpoint') }}</label>
-      <AInput
-        :id="`${controlId}-endpoint`"
-        v-model:value="endpoint"
-        name="agent-endpoint"
-        autocomplete="off"
-        :disabled="busy || Boolean(agentId)"
-      />
-      <label :for="`${controlId}-model`">{{ t('tauriPreview.editorAgent.model') }}</label>
-      <AInput
-        :id="`${controlId}-model`"
-        v-model:value="model"
-        name="agent-model"
-        autocomplete="off"
-        :disabled="busy || Boolean(agentId)"
-      />
-      <label :for="`${controlId}-credential`">{{ t('tauriPreview.editorAgent.credential') }}</label>
-      <AInput
-        :id="`${controlId}-credential`"
-        v-model:value="credential"
-        name="agent-credential"
-        type="password"
-        autocomplete="off"
-        :disabled="busy || Boolean(agentId)"
-      />
+      <label>
+        {{ t('tauriPreview.modelSettings.mode') }}
+        <select
+          name="agent-model-source"
+          :value="modelSource"
+          :disabled="busy || Boolean(agentId)"
+          @change="selectModelSource"
+        >
+          <option value="direct">{{ t('tauriPreview.modelSettings.direct') }}</option>
+          <option value="saved">{{ t('tauriPreview.modelSettings.saved') }}</option>
+        </select>
+      </label>
+      <template v-if="modelSource === 'direct'">
+        <label :for="`${controlId}-endpoint`">{{ t('tauriPreview.editorAgent.endpoint') }}</label>
+        <AInput
+          :id="`${controlId}-endpoint`"
+          v-model:value="endpoint"
+          name="agent-endpoint"
+          autocomplete="off"
+          :disabled="busy || Boolean(agentId)"
+        />
+        <label :for="`${controlId}-model`">{{ t('tauriPreview.editorAgent.model') }}</label>
+        <AInput
+          :id="`${controlId}-model`"
+          v-model:value="model"
+          name="agent-model"
+          autocomplete="off"
+          :disabled="busy || Boolean(agentId)"
+        />
+        <label :for="`${controlId}-credential`">{{
+          t('tauriPreview.editorAgent.credential')
+        }}</label>
+        <AInput
+          :id="`${controlId}-credential`"
+          v-model:value="credential"
+          name="agent-credential"
+          type="password"
+          autocomplete="off"
+          :disabled="busy || Boolean(agentId)"
+        />
+      </template>
+      <label v-else>
+        {{ t('tauriPreview.editorAgent.model') }}
+        <select
+          v-model="selectedProfile"
+          name="agent-model-profile"
+          :disabled="busy || Boolean(agentId)"
+        >
+          <option value="">{{ t('tauriPreview.modelSettings.defaultModel') }}</option>
+          <option
+            v-for="profile in modelCatalog?.profiles ?? []"
+            :key="profile.id"
+            :value="profile.id"
+            :disabled="profile.authorization === 'needsAuthorization'"
+          >
+            {{ profile.title }}
+          </option>
+        </select>
+      </label>
       <label class="agent-history-choice">
         <input
           v-model="saveHistory"

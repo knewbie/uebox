@@ -401,6 +401,30 @@ async function handleRoleChange(role: ModelRole, value: string | undefined): Pro
   const result = await state.setRole(targets, binding)
   if (!result.ok) message.error(result.error || t('aiProvider.messages.saveFailed'))
 }
+const exportingProfiles = ref(false)
+const canExportProfiles = Boolean(window.api?.aiProvider?.exportModelProfiles)
+
+async function exportProfiles(): Promise<void> {
+  if (exportingProfiles.value || !window.api?.aiProvider?.exportModelProfiles) return
+  exportingProfiles.value = true
+  try {
+    const result = await window.api.aiProvider.exportModelProfiles()
+    if (result.success) {
+      message.success(
+        t('aiProvider.profileTransfer.exported', {
+          count: result.profiles,
+          unsupported: result.unsupportedModels
+        })
+      )
+    } else if (result.code !== 'model_profile_export_cancelled') {
+      message.error(t(`aiProvider.profileTransfer.errors.${result.code}`))
+    }
+  } catch {
+    message.error(t('aiProvider.profileTransfer.errors.model_profile_export_unavailable'))
+  } finally {
+    exportingProfiles.value = false
+  }
+}
 </script>
 
 <template>
@@ -429,6 +453,9 @@ async function handleRoleChange(role: ModelRole, value: string | undefined): Pro
     <!-- 一、服务商 -->
     <div class="settings-subsection">
       <div class="subsection-title">{{ $t('aiProvider.sources.title') }}</div>
+      <AppButton v-if="canExportProfiles" :disabled="exportingProfiles" @click="exportProfiles">
+        {{ t('aiProvider.profileTransfer.export') }}
+      </AppButton>
 
       <div class="source-grid">
         <!-- 占位两张：Provider 通常两三个，多一张少一张真卡片到位时都会跳一下 -->

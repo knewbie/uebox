@@ -39,6 +39,32 @@ it('requires explicit model configuration and a connected fixed Godot target', a
   wrapper.unmount()
 })
 
+it('starts a saved model using its profile ID without an endpoint or credential in Vue', async () => {
+  vi.mocked(invoke)
+    .mockResolvedValueOnce({
+      profiles: [{ id: 'saved-local', title: 'Saved fixture', authorization: 'keychain' }],
+      bindings: { agent: 'saved-local' }
+    })
+    .mockResolvedValueOnce({ agentId: 'agent-saved' })
+  const wrapper = mount(AgentPanel, {
+    props: { sessionId: 'fixed-target', ready: true },
+    global: { plugins: [createAppI18n('en-US')] }
+  })
+  expect(invoke).not.toHaveBeenCalled()
+  await wrapper.get('select[name="agent-model-source"]').setValue('saved')
+  await flushPromises()
+  expect(invoke).toHaveBeenCalledExactlyOnceWith('get_model_settings')
+  expect(wrapper.find('input[name="agent-credential"]').exists()).toBe(false)
+  await wrapper.get('select[name="agent-model-profile"]').setValue('saved-local')
+  await wrapper.get('form.agent-form').trigger('submit')
+  await flushPromises()
+  expect(invoke).toHaveBeenLastCalledWith('create_godot_agent_from_profile', {
+    sessionId: 'fixed-target',
+    profileId: 'saved-local'
+  })
+  wrapper.unmount()
+})
+
 it('discards a late poll response after cancellation and keeps draining visible', async () => {
   let resolvePoll: (value: unknown) => void = () => {}
   vi.mocked(invoke).mockImplementation((command) => {

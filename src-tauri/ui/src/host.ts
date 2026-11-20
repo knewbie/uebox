@@ -7,6 +7,7 @@ export type CapabilityId =
   | 'projectRegistration'
   | 'chatHistory'
   | 'legacyHistory'
+  | 'modelSettings'
   | 'settings'
 
 export interface HostStatus {

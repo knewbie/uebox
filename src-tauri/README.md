@@ -175,6 +175,29 @@ snapshot leaves one archived copy. Updated snapshots are retained separately.
 可按需查看。原始内容未保存到可见历史的附件会标记为不可用。同一快照重复导入只保留一份，
 历史内容更新后的快照单独归档。
 
+### Saved model settings / 模型设置
+
+In **Model settings**, add a Chat Completions endpoint and model ID. Choose
+whether the model needs a system credential or an environment variable. The
+Rust host associates credentials with the saved endpoint. In any of the three
+assistant panels, choose **Use a saved model** to select a profile or the Agent
+default. Editing or removing a profile revokes its credential for subsequent
+requests from an assistant configured with that profile.
+
+Electron's **Export model profiles** action writes supported model metadata
+and default bindings to a JSON file. Import that file in Tauri's **Model
+settings**. Profiles that used credentials, OAuth, or custom headers require
+authorization before use. Credential values stay in the original app's store
+and the new system store is configured separately.
+
+在「模型设置」添加 Chat Completions 地址和模型 ID，并选择系统凭据或环境变量等授权方式。
+Rust 将保存的凭据绑定到配置地址。三种引擎的助手均可选择「使用已保存的模型」及助手默认模型。
+修改或移除模型配置会撤销已经使用该凭据的助手后续请求。
+
+Electron 的「导出模型配置」仅保存受支持的模型元数据和默认用途绑定。在 Tauri 的「模型设置」
+中选中并导入文件。原来使用凭据、OAuth 或自定义请求头的配置需重新授权。原系统存储继续保留，
+新系统凭据单独配置。
+
 ### Project registrations / 项目登记
 
 Choose an engine and enter a name and absolute project directory in the preview.

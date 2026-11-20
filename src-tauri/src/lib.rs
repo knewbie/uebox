@@ -7,6 +7,7 @@ mod host;
 mod legacy_history;
 mod profile_storage;
 mod project_library;
+mod settings;
 #[cfg(feature = "unity")]
 mod unity;
 #[cfg(feature = "unity")]
@@ -27,7 +28,8 @@ pub fn configure_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> taur
     let builder = builder
         .manage(project_library::ProjectRegistrations::default())
         .manage(chat_history::ChatHistoryHost::default())
-        .manage(legacy_history::LegacyHistoryHost::default());
+        .manage(legacy_history::LegacyHistoryHost::default())
+        .manage(settings::ModelSettings::default());
     #[cfg(feature = "godot")]
     let builder = builder.manage(godot::GodotSessions::default());
     #[cfg(feature = "unity")]
@@ -52,6 +54,11 @@ pub fn configure_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> taur
         legacy_history::list_legacy_chats,
         legacy_history::get_legacy_chat,
         legacy_history::read_legacy_chat_attachment,
+        settings::get_model_settings,
+        settings::save_model_profile,
+        settings::remove_model_profile,
+        settings::bind_model_profile,
+        settings::transfer::import_model_profiles,
         project_library::list_registered_projects,
         project_library::register_project,
         project_library::remove_registered_project,
@@ -71,6 +78,8 @@ pub fn configure_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> taur
         #[cfg(feature = "godot")]
         godot_agent::create_godot_agent,
         #[cfg(feature = "godot")]
+        godot_agent::create_godot_agent_from_profile,
+        #[cfg(feature = "godot")]
         godot_agent::start_godot_agent,
         #[cfg(feature = "godot")]
         godot_agent::poll_godot_agent,
@@ -86,6 +95,8 @@ pub fn configure_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> taur
         unity_agent::release_unity_agent_target,
         #[cfg(feature = "unity")]
         unity_agent::create_unity_agent,
+        #[cfg(feature = "unity")]
+        unity_agent::create_unity_agent_from_profile,
         #[cfg(feature = "unity")]
         unity_agent::start_unity_agent,
         #[cfg(feature = "unity")]
@@ -104,6 +115,8 @@ pub fn configure_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> taur
         unreal::stop_unreal_listener,
         #[cfg(feature = "unreal")]
         unreal_agent::create_unreal_agent,
+        #[cfg(feature = "unreal")]
+        unreal_agent::create_unreal_agent_from_profile,
         #[cfg(feature = "unreal")]
         unreal_agent::start_unreal_agent,
         #[cfg(feature = "unreal")]

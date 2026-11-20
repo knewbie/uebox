@@ -38,6 +38,7 @@ import type { RealtimeEchoGuard } from '../shared/realtimeEchoGuard'
  */
 import type { NamingRulesSavePayload } from '../main/utils/namingRulesConfig'
 import type { ChatHistoryExportResult } from '../shared/chatHistoryTransfer'
+import type { PortableModelExportReply } from '../shared/modelProfileTransfer'
 import type { ProjectRegistrationExportResult } from '../shared/projectRegistration'
 
 /**
@@ -2336,6 +2337,8 @@ const api = {
     }
   },
   aiProvider: {
+    exportModelProfiles: (): Promise<PortableModelExportReply> =>
+      ipcRenderer.invoke('ai-provider:export-model-profiles'),
     /** 内置厂商目录。纯静态数据，不联网 */
     catalog: () => ipcRenderer.invoke('ai-provider:catalog'),
     getSettings: () => ipcRenderer.invoke('ai-provider:get-settings'),
