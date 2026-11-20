@@ -4,6 +4,7 @@ import { onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppAlert from '@renderer/components/AppAlert.vue'
 import AppButton from '@renderer/components/AppButton.vue'
+import ScreenRecorderPanel from './ScreenRecorderPanel.vue'
 
 const { t, locale } = useI18n()
 const tray = ref<boolean | null>(null)
@@ -79,6 +80,7 @@ onMounted(() => update())
       type="error"
       :message="t(`tauriPreview.desktop.browserErrors.${browserError}`)"
     />
+    <ScreenRecorderPanel />
   </section>
 </template>
 

@@ -385,6 +385,29 @@ export default {
       }
     },
     desktop: {
+      capture: {
+        title: 'Screen recording',
+        intro:
+          'The system picker lets you choose a window or screen. Finished recordings are saved as MP4 files.',
+        audio: 'Include system audio',
+        start: 'Choose what to record',
+        stop: 'Stop recording',
+        cancel: 'Cancel selection',
+        reveal: 'Show recording',
+        error: 'Unable to complete the recording request.',
+        unsupported: 'Screen recording is available on macOS 15 or later.',
+        cleanup: 'A temporary recording file still needs cleanup.',
+        phase: {
+          selecting: 'Waiting for a selection in the system picker…',
+          recording: 'Recording in progress…',
+          stopping: 'Finishing the recording…',
+          completed: 'Saved “{name}”.',
+          cancelled: 'Recording cancelled.',
+          failed: 'The recording could not be saved.',
+          unsupported: 'Screen recording is unavailable on this system.',
+          busy: 'The system recorder is busy.'
+        }
+      },
       browserUrl: 'HTTPS page address',
       browserOpen: 'Open browser window',
       browserErrors: {

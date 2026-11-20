@@ -19,6 +19,7 @@ mod notes;
 mod profile_storage;
 mod project_collections;
 mod project_library;
+mod screen_recording;
 mod settings;
 #[cfg(feature = "unity")]
 mod unity;
@@ -101,6 +102,10 @@ pub fn configure_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> taur
             asset_index::list_asset_items,
             asset_index::reveal_asset_original,
             desktop::set_desktop_tray,
+            screen_recording::screen_recording_status,
+            screen_recording::start_screen_recording,
+            screen_recording::stop_screen_recording,
+            screen_recording::reveal_screen_recording,
             #[cfg(all(
                 any(target_os = "macos", target_os = "linux"),
                 any(feature = "unreal", feature = "unity", feature = "godot")
@@ -224,7 +229,40 @@ pub fn run() {
     let app = configure_commands(tauri::Builder::default())
         .build(tauri::generate_context!())
         .expect("failed to build the Tauri host");
-    app.run(|_handle, _event| {
+    #[cfg(target_os = "macos")]
+    let recording_exit_ready = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    #[cfg(target_os = "macos")]
+    let mut stopping_recording = false;
+    app.run(move |_handle, _event| {
+        #[cfg(target_os = "macos")]
+        if let tauri::RunEvent::ExitRequested { api, .. } = &_event {
+            use std::sync::atomic::Ordering;
+            if !recording_exit_ready.load(Ordering::Acquire)
+                && screen_recording::stop_for_shutdown()
+            {
+                api.prevent_exit();
+                if !stopping_recording {
+                    stopping_recording = true;
+                    let app = _handle.clone();
+                    let exit_ready = recording_exit_ready.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let deadline =
+                            std::time::Instant::now() + std::time::Duration::from_secs(18);
+                        let _ = tauri::async_runtime::spawn_blocking(move || {
+                            while screen_recording::stop_for_shutdown()
+                                && std::time::Instant::now() < deadline
+                            {
+                                std::thread::sleep(std::time::Duration::from_millis(125));
+                            }
+                        })
+                        .await;
+                        exit_ready.store(true, Ordering::Release);
+                        app.exit(0);
+                    });
+                }
+                return;
+            }
+        }
         #[cfg(target_os = "macos")]
         if matches!(
             _event,

@@ -4940,6 +4940,7 @@ name = "uebox-tauri"
 version = "1.0.12"
 dependencies = [
  "base64 0.22.1",
+ "cc",
  "futures-util",
  "getrandom 0.2.17",
  "serde",

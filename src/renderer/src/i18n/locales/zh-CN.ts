@@ -372,6 +372,28 @@ export default {
       }
     },
     desktop: {
+      capture: {
+        title: '录屏',
+        intro: '通过系统选择器选择窗口或屏幕。录制完成后将保存为 MP4 文件。',
+        audio: '录制系统声音',
+        start: '选择录制内容',
+        stop: '停止录制',
+        cancel: '取消选择',
+        reveal: '显示录制文件',
+        error: '无法完成录制请求。',
+        unsupported: '录屏在 macOS 15 或更高版本上可用。',
+        cleanup: '仍有一个临时录制文件需要清理。',
+        phase: {
+          selecting: '等待在系统选择器中选择…',
+          recording: '正在录制…',
+          stopping: '正在完成录制…',
+          completed: '已保存「{name}」。',
+          cancelled: '已取消录制。',
+          failed: '无法保存录制文件。',
+          unsupported: '此系统暂不支持录屏。',
+          busy: '系统录制器正忙。'
+        }
+      },
       browserUrl: 'HTTPS 网页地址',
       browserOpen: '打开浏览器窗口',
       browserErrors: {

@@ -13,7 +13,9 @@ it('leaves the system tray off until the user enables it and retains the state a
     .mockResolvedValueOnce(false)
     .mockResolvedValueOnce(true)
     .mockRejectedValueOnce('desktop_tray_unavailable')
-  const wrapper = mount(DesktopPanel, { global: { plugins: [createAppI18n('zh-CN')] } })
+  const wrapper = mount(DesktopPanel, {
+    global: { plugins: [createAppI18n('zh-CN')], stubs: { ScreenRecorderPanel: true } }
+  })
   try {
     await flushPromises()
     expect(ipc.mock.calls).toEqual([['desktop_tray']])
@@ -36,7 +38,9 @@ it('leaves the system tray off until the user enables it and retains the state a
 it('opens a browser only after a URL is submitted and shows a stable error on a failed request', async () => {
   const ipc = vi.mocked(invoke)
   ipc.mockReset().mockResolvedValueOnce(false).mockRejectedValueOnce('browser_already_open')
-  const wrapper = mount(DesktopPanel, { global: { plugins: [createAppI18n('en-US')] } })
+  const wrapper = mount(DesktopPanel, {
+    global: { plugins: [createAppI18n('en-US')], stubs: { ScreenRecorderPanel: true } }
+  })
   try {
     await flushPromises()
     await wrapper.get('#isolated-browser-url').setValue('https://fixture.example/page')

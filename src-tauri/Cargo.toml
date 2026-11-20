@@ -21,6 +21,7 @@ name = "godot_editor_fixture"
 required-features = ["godot"]
 
 [build-dependencies]
+cc = "1"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]

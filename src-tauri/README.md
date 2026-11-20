@@ -259,6 +259,15 @@ Top-level navigation stays on the selected HTTPS origin. The window is isolated
 from the application commands and uses a separate browsing context.
 The project library opens a registered directory using its saved registration ID.
 
+### macOS screen recording
+
+On macOS 15 or later, Desktop preferences opens the system content picker after
+the user chooses to record. It supports a single window or display, with optional
+system audio. A finished MP4 is published in the application's private
+`screen-recordings` directory and can be revealed in the file manager.
+Cancelling or a failed recording cleans its working files. On normal exit UEBox
+gives the native recorder time to finish before shutting down.
+
 ### Project registrations / 项目登记
 
 Choose an engine and enter a name and absolute project directory in the preview.
