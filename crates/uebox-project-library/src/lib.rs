@@ -13,10 +13,19 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use rusqlite::config::DbConfig;
-use rusqlite::{params, Connection, ErrorCode, OpenFlags, Transaction, TransactionBehavior};
+use rusqlite::{
+    params, Connection, ErrorCode, OpenFlags, OptionalExtension, Transaction, TransactionBehavior,
+};
+
+mod cover;
+mod metadata;
+
+pub use cover::{CoverFormat, CoverRecord};
+pub use metadata::{ProjectMetadata, ProjectWithMetadata};
 
 const APPLICATION_ID: i64 = 0x5542_504c; // UBPL
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
+const V1_SCHEMA_VERSION: u32 = 1;
 const SQLITE_HEADER: &[u8; 16] = b"SQLite format 3\0";
 const BUSY_TIMEOUT: Duration = Duration::from_secs(3);
 const CREATE_PROJECTS: &str = "CREATE TABLE projects (
@@ -455,6 +464,10 @@ fn raw_database_header(connection: &Connection) -> Result<[u8; 100], LibraryErro
 }
 
 fn validate_header(connection: &Connection) -> Result<(), LibraryError> {
+    validate_header_with_version(connection, SCHEMA_VERSION as u32)
+}
+
+fn validate_header_with_version(connection: &Connection, version: u32) -> Result<(), LibraryError> {
     let header = raw_database_header(connection)?;
     if &header[..16] != SQLITE_HEADER {
         return Err(failure(
@@ -469,7 +482,7 @@ fn validate_header(connection: &Connection) -> Result<(), LibraryError> {
                 .expect("database header word"),
         )
     };
-    if word(68) != APPLICATION_ID as u32 || word(60) != SCHEMA_VERSION as u32 {
+    if word(68) != APPLICATION_ID as u32 || word(60) != version {
         return Err(failure(
             ErrorKind::Unsupported,
             "database application ID or schema version is not supported",
@@ -485,13 +498,83 @@ fn validate_header(connection: &Connection) -> Result<(), LibraryError> {
 }
 
 fn validate_schema(connection: &Connection) -> Result<(), LibraryError> {
+    validate_schema_with(connection, SCHEMA_VERSION, current_schema())
+}
+
+fn validate_v1_schema(connection: &Connection) -> Result<(), LibraryError> {
+    validate_schema_with(connection, V1_SCHEMA_VERSION as i64, v1_schema())
+}
+
+fn current_schema() -> Vec<(String, String, String, Option<String>)> {
+    vec![
+        (
+            "index".to_string(),
+            "sqlite_autoindex_projects_1".to_string(),
+            "projects".to_string(),
+            None,
+        ),
+        (
+            "table".to_string(),
+            "project_covers".to_string(),
+            "project_covers".to_string(),
+            Some(cover::CREATE_COVERS.to_string()),
+        ),
+        (
+            "table".to_string(),
+            "project_metadata".to_string(),
+            "project_metadata".to_string(),
+            Some(metadata::CREATE_METADATA.to_string()),
+        ),
+        (
+            "table".to_string(),
+            "projects".to_string(),
+            "projects".to_string(),
+            Some(CREATE_PROJECTS.to_string()),
+        ),
+        (
+            "table".to_string(),
+            "sqlite_sequence".to_string(),
+            "sqlite_sequence".to_string(),
+            Some("CREATE TABLE sqlite_sequence(name,seq)".to_string()),
+        ),
+    ]
+}
+
+fn v1_schema() -> Vec<(String, String, String, Option<String>)> {
+    vec![
+        (
+            "index".to_string(),
+            "sqlite_autoindex_projects_1".to_string(),
+            "projects".to_string(),
+            None,
+        ),
+        (
+            "table".to_string(),
+            "projects".to_string(),
+            "projects".to_string(),
+            Some(CREATE_PROJECTS.to_string()),
+        ),
+        (
+            "table".to_string(),
+            "sqlite_sequence".to_string(),
+            "sqlite_sequence".to_string(),
+            Some("CREATE TABLE sqlite_sequence(name,seq)".to_string()),
+        ),
+    ]
+}
+
+fn validate_schema_with(
+    connection: &Connection,
+    version: i64,
+    expected: Vec<(String, String, String, Option<String>)>,
+) -> Result<(), LibraryError> {
     let app_id: i64 = connection
         .pragma_query_value(None, "application_id", |row| row.get(0))
         .map_err(|error| sqlite_error("read application ID", error))?;
-    let version: i64 = connection
+    let stored_version: i64 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .map_err(|error| sqlite_error("read schema version", error))?;
-    if app_id != APPLICATION_ID || version != SCHEMA_VERSION {
+    if app_id != APPLICATION_ID || stored_version != version {
         return Err(failure(
             ErrorKind::Unsupported,
             "database application ID or schema version changed",
@@ -521,26 +604,6 @@ fn validate_schema(connection: &Connection) -> Result<(), LibraryError> {
         .map_err(|error| sqlite_error("query database schema", error))?
         .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(|error| sqlite_error("read database schema row", error))?;
-    let expected = vec![
-        (
-            "index".to_string(),
-            "sqlite_autoindex_projects_1".to_string(),
-            "projects".to_string(),
-            None,
-        ),
-        (
-            "table".to_string(),
-            "projects".to_string(),
-            "projects".to_string(),
-            Some(CREATE_PROJECTS.to_string()),
-        ),
-        (
-            "table".to_string(),
-            "sqlite_sequence".to_string(),
-            "sqlite_sequence".to_string(),
-            Some("CREATE TABLE sqlite_sequence(name,seq)".to_string()),
-        ),
-    ];
     if objects != expected {
         return Err(failure(
             ErrorKind::Unsupported,
@@ -619,6 +682,91 @@ fn open_writable(path: &Path, expected: FileIdentity) -> Result<Connection, Libr
     Ok(connection)
 }
 
+/// Whether `database` is a schema-v1 project library that must be upgraded.
+/// Only a genuine UBPL application ID at user_version 1 qualifies; every other
+/// database falls through to the normal strict open, which rejects it.
+fn needs_v1_migration(database: &Path) -> Result<bool, LibraryError> {
+    let identity = database_identity(database)?;
+    reject_wal_sidecars(database)?;
+    let connection = Connection::open_with_flags(
+        database,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .map_err(|error| sqlite_error("open project database for version detection", error))?;
+    connection
+        .set_db_config(DbConfig::SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE, true)
+        .map_err(|error| sqlite_error("disable checkpoint on close", error))?;
+    connection
+        .busy_timeout(BUSY_TIMEOUT)
+        .map_err(|error| sqlite_error("configure database timeout", error))?;
+    verify_database_identity(&connection, database, identity)?;
+    let header = raw_database_header(&connection)?;
+    if &header[..16] != SQLITE_HEADER {
+        return Err(failure(
+            ErrorKind::Corrupt,
+            "database does not have a SQLite header",
+        ));
+    }
+    let app_id = u32::from_be_bytes(header[68..72].try_into().expect("application id word"));
+    let version = u32::from_be_bytes(header[60..64].try_into().expect("version word"));
+    Ok(app_id == APPLICATION_ID as u32 && version == V1_SCHEMA_VERSION)
+}
+
+/// Upgrade a schema-v1 library to v2 in place, in one transaction, preserving
+/// every registration (ID, engine, name, path — including offline ones). The
+/// transaction is atomic: on failure the database remains a valid v1 library.
+fn migrate_v1_to_v2(database: &Path) -> Result<(), LibraryError> {
+    let identity = database_identity(database)?;
+    reject_wal_sidecars(database)?;
+    let mut connection = Connection::open_with_flags(
+        database,
+        OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .map_err(|error| sqlite_error("open project database for migration", error))?;
+    connection
+        .set_db_config(DbConfig::SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE, true)
+        .map_err(|error| sqlite_error("disable checkpoint on close", error))?;
+    connection
+        .busy_timeout(BUSY_TIMEOUT)
+        .map_err(|error| sqlite_error("configure database timeout", error))?;
+    verify_database_identity(&connection, database, identity)?;
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|error| sqlite_error("begin schema migration", error))?;
+    verify_database_identity(&transaction, database, identity)?;
+    // Re-read the version under the write lock: a concurrent caller may have
+    // already upgraded this database while we waited for the lock.
+    let version: i64 = transaction
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .map_err(|error| sqlite_error("read schema version for migration", error))?;
+    if version == V1_SCHEMA_VERSION as i64 {
+        validate_v1_schema(&transaction)?;
+        transaction
+            .execute(cover::CREATE_COVERS, [])
+            .map_err(|error| sqlite_error("add cover schema", error))?;
+        transaction
+            .execute(metadata::CREATE_METADATA, [])
+            .map_err(|error| sqlite_error("add metadata schema", error))?;
+        transaction
+            .pragma_update(None, "user_version", SCHEMA_VERSION)
+            .map_err(|error| sqlite_error("bump schema version", error))?;
+    } else if version == SCHEMA_VERSION {
+        validate_schema(&transaction)?;
+    } else {
+        return Err(failure(
+            ErrorKind::Unsupported,
+            "unexpected schema version during migration",
+        ));
+    }
+    verify_database_identity(&transaction, database, identity)?;
+    transaction
+        .commit()
+        .map_err(|error| sqlite_error("commit schema migration", error))?;
+    validate_header(&connection)?;
+    validate_schema(&connection)?;
+    Ok(())
+}
+
 fn read_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<(i64, String, String, String)> {
     Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
 }
@@ -642,6 +790,26 @@ fn into_record(row: (i64, String, String, String)) -> Result<ProjectRecord, Libr
         name,
         path: PathBuf::from(path),
     })
+}
+
+pub(crate) fn require_registered(
+    connection: &Connection,
+    project_id: i64,
+) -> Result<(), LibraryError> {
+    let exists = connection
+        .query_row("SELECT 1 FROM projects WHERE id = ?1", [project_id], |_| {
+            Ok(())
+        })
+        .optional()
+        .map_err(|error| sqlite_error("check project registration", error))?
+        .is_some();
+    if !exists {
+        return Err(failure(
+            ErrorKind::Missing,
+            "project registration does not exist",
+        ));
+    }
+    Ok(())
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -820,6 +988,12 @@ impl ProjectLibrary {
             .execute(CREATE_PROJECTS, [])
             .map_err(|error| sqlite_error("create project schema", error))?;
         transaction
+            .execute(cover::CREATE_COVERS, [])
+            .map_err(|error| sqlite_error("create cover schema", error))?;
+        transaction
+            .execute(metadata::CREATE_METADATA, [])
+            .map_err(|error| sqlite_error("create metadata schema", error))?;
+        transaction
             .pragma_update(None, "application_id", APPLICATION_ID)
             .map_err(|error| sqlite_error("set application ID", error))?;
         transaction
@@ -846,9 +1020,13 @@ impl ProjectLibrary {
         Ok((Self { database, identity }, result))
     }
 
-    /// Open a previously created library, refusing unknown or changed schemas.
+    /// Open a previously created library, upgrading a legacy schema-v1 library
+    /// to v2 in place first. Unknown or changed schemas are refused.
     pub fn open_existing(database: impl AsRef<Path>) -> Result<Self, LibraryError> {
         let database = database_path(database.as_ref())?;
+        if needs_v1_migration(&database)? {
+            migrate_v1_to_v2(&database)?;
+        }
         let verified = open_readonly(&database, None)?;
         let identity = verified.identity;
         drop(verified);
@@ -983,10 +1161,34 @@ impl ProjectLibrary {
             ));
         }
         self.write_transaction("removal", |transaction| {
+            // Cascade the per-project metadata and cover rows in the same
+            // transaction. Cover private-copy files are the host's concern:
+            // they are not reachable here without a covers directory, so call
+            // `remove_cover` first when the file must also be deleted.
+            transaction
+                .execute("DELETE FROM project_covers WHERE project_id = ?1", [id])
+                .map_err(|error| sqlite_error("remove project cover metadata", error))?;
+            transaction
+                .execute("DELETE FROM project_metadata WHERE project_id = ?1", [id])
+                .map_err(|error| sqlite_error("remove project metadata", error))?;
             let removed = transaction
                 .execute("DELETE FROM projects WHERE id = ?1", [id])
                 .map_err(|error| sqlite_error("remove project registration", error))?;
             Ok(removed != 0)
         })
+    }
+
+    fn project_registered(&self, project_id: i64) -> Result<bool, LibraryError> {
+        let verified = open_readonly(&self.database, Some(self.identity))?;
+        let exists = verified
+            .connection
+            .query_row("SELECT 1 FROM projects WHERE id = ?1", [project_id], |_| {
+                Ok(())
+            })
+            .optional()
+            .map_err(|error| sqlite_error("check project registration", error))?
+            .is_some();
+        verify_database_identity(&verified.connection, &self.database, self.identity)?;
+        Ok(exists)
     }
 }

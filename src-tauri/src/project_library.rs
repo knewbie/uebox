@@ -1,3 +1,4 @@
+pub(crate) mod properties;
 mod storage;
 #[cfg(test)]
 mod tests;
@@ -43,6 +44,8 @@ pub(crate) struct RegisteredProject {
     engine: &'static str,
     name: String,
     path: PathBuf,
+    #[serde(rename = "pinned", skip_serializing_if = "std::ops::Not::not")]
+    is_pinned: bool,
 }
 
 impl From<ProjectRecord> for RegisteredProject {
@@ -56,6 +59,7 @@ impl From<ProjectRecord> for RegisteredProject {
             },
             name: project.name,
             path: project.path,
+            is_pinned: false,
         }
     }
 }
@@ -183,8 +187,15 @@ pub(crate) async fn list_registered_projects<R: Runtime>(
         let Some(library) = library else {
             return Ok(Vec::new());
         };
-        let records = library.list().map_err(library_error)?;
-        Ok(records.into_iter().map(RegisteredProject::from).collect())
+        let records = library.list_with_metadata().map_err(library_error)?;
+        Ok(records
+            .into_iter()
+            .map(|entry| {
+                let mut project = RegisteredProject::from(entry.project);
+                project.is_pinned = entry.metadata.is_pinned;
+                project
+            })
+            .collect())
     })
     .await
 }

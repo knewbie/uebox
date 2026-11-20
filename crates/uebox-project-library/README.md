@@ -9,10 +9,12 @@ modify projects, scan for editors, or start them.
 - `ProjectLibrary::create_new(absolute_database_path)` initializes a fresh
   database in a same-directory staging area and publishes it with a no-clobber
   hard link. An existing file, symlink, or SQLite sidecar is never overwritten.
-- `ProjectLibrary::open_existing(absolute_database_path)` accepts only this
-  library's SQLite application ID, version and exact schema. Unknown versions,
-  extra objects, WAL-mode databases and database hard links are rejected; the
-  library never auto-clears or migrates them.
+- `ProjectLibrary::open_existing(absolute_database_path)` accepts this
+  library's SQLite application ID and exact schema. A legacy schema-v1 library
+  (the pre-metadata/cover schema) is upgraded to v2 in place, atomically, in one
+  transaction, preserving every registration — IDs, engine, name, and path,
+  including offline ones. Any other version, extra object, WAL-mode database or
+  database hard link is rejected without modification.
 - `register(engine, name, absolute_project_directory)` records the user-chosen
   path and name. The directory must be online at registration. Within the same
   engine, current online directory identities are compared to reject symlink
@@ -35,6 +37,36 @@ count as `duplicate_in_file` even when the first was `already_registered`.
 Skipped records do not use IDs. The returned summary describes a committed
 batch.
 
+## Engine-agnostic metadata
+
+`set_metadata(project_id, note, description, is_pinned, sort_order)` stores the
+user's per-project note, description, pinned flag, and sort order, keyed by the
+registration ID. It is a full write: `None` (or an empty string) clears a text
+field, and every field is written together in one transaction, then read back
+before it is returned. `get_metadata(project_id)` returns the stored row or
+`None` when it has never been set; `list_with_metadata()` returns every
+registration with its metadata (defaulted) and cover metadata, ordered
+pinned-first, then sort order, then registration ID. None of this reads the
+project on disk — a registration with no metadata row is all defaults.
+
+## Project covers
+
+Covers are explicit only: the host supplies bytes from a file the user chose,
+never a scan of the project. `set_cover(covers_dir, project_id, source, bytes)`
+verifies the magic signature (PNG, JPEG, or WebP only, at most 32 MiB) and the
+declared pixel dimensions (each side ≤ `MAX_COVER_DIMENSION`, total ≤
+`MAX_COVER_PIXELS`, so a tiny compressed file cannot decode into a huge image),
+writes a private copy named `<project_id>.<ext>` (ext from the format) into the
+host-supplied covers directory, and records the detected format plus the source
+path as provenance. The source path is stored for display and is never opened.
+`get_cover` returns the stored metadata. `read_cover` returns the private copy's
+bytes, but only when the stored file name matches the derived
+`<project_id>.<ext>` and the copy is a regular, non-symlink file within the size
+limit; a missing file reads as absent. `remove_cover` deletes both the row and,
+when present, the private file. Replacing a cover with a different format
+removes the stale copy. The covers directory is created with owner-only
+permissions when it does not exist and must never be a symlink or reparse point.
+
 ## Boundaries
 
 The host is responsible for a private, separate database location and must not
@@ -46,6 +78,13 @@ SQLite runtime or raw-file locking code. Calls using this crate coordinate
 through SQLite transactions. The caller must also prevent concurrent renames,
 hard-link changes or sidecar replacement by unrelated code; filesystem paths
 cannot be atomically reserved with their SQLite sidecar names as a group.
+
+The covers directory is a separate, host-supplied location. The cover write and
+the cover-metadata row are committed in two steps (file first, then row), so a
+failed row write rolls the file back best-effort but the two are not a single
+atomic unit. `remove(id)` cascades the metadata and cover rows in the same
+transaction, but cannot reach the private copy file — call `remove_cover`
+before `remove` when the file must also be deleted.
 
 The selected project path and name are stored exactly as supplied. Paths must
 be absolute and representable as UTF-8; this avoids silently replacing bytes or

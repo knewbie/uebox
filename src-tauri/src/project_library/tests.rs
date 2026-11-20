@@ -253,3 +253,125 @@ fn commands_preserve_incompatible_data_and_rollback_journals() {
     );
     assert_eq!(fs::read(&database).unwrap(), foreign);
 }
+
+#[test]
+fn metadata_and_cover_commands_keep_engine_registrations_separate() {
+    const IMAGE: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+    let fixture = tempfile::tempdir().unwrap();
+    let root = fixture.path().join("preview-data");
+    let project = fixture.path().join("shared-project");
+    fs::create_dir(&project).unwrap();
+    fs::write(project.join("project.godot"), "untouched").unwrap();
+    let first = window(&root);
+    let unreal = invoke(
+        &first,
+        "register_project",
+        json!({"engine":"unreal","name":"UE","path":project}),
+    )
+    .unwrap();
+    let godot = invoke(
+        &first,
+        "register_project",
+        json!({"engine":"godot","name":"Godot","path":project}),
+    )
+    .unwrap();
+
+    let fields = json!({"description":"Godot fixture","note":"Review scene","isPinned":true,"sortOrder":1.5});
+    assert_eq!(
+        invoke(
+            &first,
+            "save_project_properties",
+            json!({
+                "project":godot["id"], "fields": fields
+            })
+        )
+        .unwrap(),
+        fields
+    );
+    assert_eq!(
+        invoke(
+            &first,
+            "save_project_cover",
+            json!({
+                "project":godot["id"], "encoded":"YmFk"
+            })
+        )
+        .unwrap_err(),
+        "project_cover_invalid"
+    );
+    let saved = invoke(
+        &first,
+        "save_project_cover",
+        json!({
+            "project":godot["id"], "encoded":IMAGE
+        }),
+    )
+    .unwrap();
+    assert_eq!(saved["mime"], "image/png");
+    assert_eq!(saved["data"], IMAGE);
+    let projects = invoke(&first, "list_registered_projects", json!({})).unwrap();
+    assert_eq!(projects[0]["id"], godot["id"]);
+    assert_eq!(projects[0]["pinned"], true);
+    assert_eq!(projects[1]["id"], unreal["id"]);
+    assert!(projects[1].get("pinned").is_none());
+    assert_eq!(
+        invoke(
+            &first,
+            "read_project_cover",
+            json!({"project":unreal["id"]})
+        )
+        .unwrap(),
+        Value::Null
+    );
+    assert_eq!(
+        invoke(
+            &first,
+            "get_project_properties",
+            json!({"project":unreal["id"]})
+        )
+        .unwrap()["fields"]["description"],
+        Value::Null
+    );
+    drop(first);
+
+    let reopened = window(&root);
+    let updated = invoke(
+        &reopened,
+        "get_project_properties",
+        json!({"project":godot["id"]}),
+    )
+    .unwrap();
+    assert_eq!(updated["fields"], fields);
+    assert_eq!(updated["hasCover"], true);
+    assert_eq!(
+        invoke(
+            &reopened,
+            "read_project_cover",
+            json!({"project":godot["id"]})
+        )
+        .unwrap(),
+        saved
+    );
+    assert_eq!(
+        invoke(
+            &reopened,
+            "remove_project_cover",
+            json!({"project":godot["id"]})
+        )
+        .unwrap(),
+        true
+    );
+    assert_eq!(
+        invoke(
+            &reopened,
+            "read_project_cover",
+            json!({"project":godot["id"]})
+        )
+        .unwrap(),
+        Value::Null
+    );
+    assert_eq!(
+        fs::read_to_string(project.join("project.godot")).unwrap(),
+        "untouched"
+    );
+}

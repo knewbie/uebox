@@ -72,6 +72,23 @@ export default {
       engines: { unreal: '虚幻引擎', unity: 'Unity', godot: 'Godot' }
     },
     projectLibrary: {
+      properties: {
+        open: '项目属性',
+        title: '「{name}」的项目属性',
+        description: '描述',
+        note: '备注',
+        order: '排序值',
+        pin: '置顶项目',
+        pinned: '已置顶',
+        save: '保存属性',
+        cover: '项目封面',
+        saveCover: '保存封面',
+        removeCover: '移除封面',
+        close: '关闭属性',
+        saved: '项目属性已保存。',
+        error: '无法更新此项目。',
+        invalidCover: '请选择不超过 8 MiB 的有效 PNG、JPEG 或 WebP 图片。'
+      },
       openFolder: '打开目录',
       openNamed: '打开「{name}」的目录',
       title: '项目登记',

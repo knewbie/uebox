@@ -10,6 +10,7 @@ interface ProjectDetails {
 
 export interface RegisteredProject extends ProjectDetails {
   id: string
+  pinned?: boolean
 }
 
 export interface ProjectImportSummary {

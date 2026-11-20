@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import ProjectPropertiesPanel from './ProjectPropertiesPanel.vue'
 import AInput from 'ant-design-vue/es/input/Input'
 import AppAlert from '@renderer/components/AppAlert.vue'
 import AppButton from '@renderer/components/AppButton.vue'
@@ -23,6 +24,7 @@ const engine = ref<ProjectEngine | ''>('')
 const name = ref('')
 const path = ref('')
 const projects = ref<RegisteredProject[]>([])
+const editedProject = ref<string | null>(null)
 const pending = ref<'list' | 'register' | 'remove' | 'import' | 'open' | null>(null)
 const listError = ref<string | null>(null)
 const writeError = ref<string | null>(null)
@@ -227,6 +229,9 @@ onMounted(refresh)
         <div class="project-details">
           <strong>{{ project.name }}</strong>
           <span>{{ t(`tauriPreview.projectLibrary.engines.${project.engine}`) }}</span>
+          <span v-if="project.pinned">{{
+            t('tauriPreview.projectLibrary.properties.pinned')
+          }}</span>
           <code>{{ project.path }}</code>
         </div>
         <AppButton
@@ -238,6 +243,13 @@ onMounted(refresh)
           {{ t('tauriPreview.projectLibrary.openFolder') }}
         </AppButton>
         <AppButton
+          data-project-properties
+          :disabled="pending !== null"
+          :aria-expanded="editedProject === project.id"
+          @click="editedProject = editedProject === project.id ? null : project.id"
+          >{{ t('tauriPreview.projectLibrary.properties.open') }}</AppButton
+        >
+        <AppButton
           data-project-remove
           :disabled="pending !== null"
           :aria-label="t('tauriPreview.projectLibrary.removeNamed', { name: project.name })"
@@ -245,6 +257,14 @@ onMounted(refresh)
         >
           {{ t('tauriPreview.projectLibrary.remove') }}
         </AppButton>
+        <ProjectPropertiesPanel
+          v-if="editedProject === project.id"
+          :key="project.id"
+          :project="project"
+          class="project-properties-row"
+          @updated="refresh"
+          @close="editedProject = null"
+        />
       </li>
     </ul>
     <p v-else-if="pending !== 'list' && !listError">{{ t('tauriPreview.projectLibrary.empty') }}</p>
@@ -324,5 +344,8 @@ onMounted(refresh)
 .project-details code {
   color: var(--color-text-secondary);
   font-size: var(--font-size-sm);
+}
+.project-properties-row {
+  grid-column: 1 / -1;
 }
 </style>

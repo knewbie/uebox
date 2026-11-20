@@ -74,6 +74,23 @@ export default {
       engines: { unreal: 'Unreal Engine', unity: 'Unity', godot: 'Godot' }
     },
     projectLibrary: {
+      properties: {
+        open: 'Properties',
+        title: 'Properties for {name}',
+        description: 'Description',
+        note: 'Note',
+        order: 'Sort order',
+        pin: 'Pin project',
+        pinned: 'Pinned',
+        save: 'Save properties',
+        cover: 'Project cover',
+        saveCover: 'Save cover',
+        removeCover: 'Remove cover',
+        close: 'Close properties',
+        saved: 'Project properties saved.',
+        error: 'Unable to update this project.',
+        invalidCover: 'Choose a valid PNG, JPEG, or WebP image up to 8 MiB.'
+      },
       openFolder: 'Open folder',
       openNamed: 'Open the folder for {name}',
       title: 'Project registration',
