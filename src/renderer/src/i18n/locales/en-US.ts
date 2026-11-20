@@ -24,6 +24,7 @@ export default {
       agent: 'AI assistant',
       libraries: 'Project and content libraries',
       settings: 'Application settings',
+      assetIndex: 'Local asset index',
       mcpInspection: 'MCP endpoints',
       desktopPreferences: 'Desktop preferences',
       noteLibrary: 'Offline notes',
@@ -315,6 +316,46 @@ export default {
       confirmDeleteNotebook:
         'Delete notebook “{title}” and all notes inside it? Standalone notes will be kept.',
       approveDelete: 'Confirm deletion'
+    },
+    assetIndex: {
+      title: 'Local asset index',
+      intro:
+        'Browse and search asset metadata imported from the desktop version. Paths refer to the original locations.',
+      selectArchive: 'Choose an asset index archive',
+      confirm: 'Import the local asset index from “{name}”?',
+      import: 'Import index',
+      importing: 'Importing…',
+      retained: 'Updated the library registration and kept the existing index.',
+      imported: 'Imported {folders} folders and {assets} assets.',
+      loadError: 'Unable to load the local asset index.',
+      retry: 'Retry',
+      noVaults: 'No local asset indexes have been imported.',
+      vault: 'Asset library',
+      selectVault: 'Choose an asset library',
+      moreVaults: 'Load more libraries',
+      registrationOnly: 'Only the library registration is available.',
+      searchLabel: 'Search names in this library',
+      search: 'Search',
+      root: 'Library root',
+      loading: 'Loading…',
+      moreFolders: 'Load more folders',
+      empty: 'No matching folders or assets.',
+      moreAssets: 'Load more assets',
+      exportTitle: 'Export local asset index',
+      exportConfirm: 'Export the registration and available index for “{name}” to a JSON file?',
+      exported: 'Exported {folderCount} folders and {assetCount} assets.',
+      exportedRegistration:
+        'Exported the registration. Select this library and export again when its index is available.',
+      exportExists: 'A file with that name exists. Choose a new filename.',
+      exportFailed: 'Unable to export this asset index.',
+      errors: {
+        generic: 'Unable to import this index. Choose an archive exported from UEBox.',
+        asset_index_conflict:
+          'The archive has a different root for a library with existing indexed assets. Export from the correct library while its index is available.',
+        asset_index_limit: 'The archive exceeds the import limits.',
+        asset_index_version: 'This asset index archive version is unsupported.',
+        asset_index_recovery_required: 'The asset index needs recovery before it can be opened.'
+      }
     },
     mcp: {
       title: 'MCP endpoints',

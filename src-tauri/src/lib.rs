@@ -1,3 +1,4 @@
+mod asset_index;
 mod chat_history;
 mod desktop;
 #[cfg(feature = "godot")]
@@ -40,6 +41,7 @@ pub fn configure_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> taur
         .manage(legacy_history::LegacyHistoryHost::default())
         .manage(settings::ModelSettings::default())
         .manage(notes::NotesHost::default())
+        .manage(asset_index::AssetIndexHost::default())
         .manage(mcp::McpHost::default())
         .manage(desktop::DesktopState::default())
         .on_menu_event(desktop::menu_event)
@@ -69,6 +71,10 @@ pub fn configure_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> taur
         host::host_status,
         desktop::desktop_tray,
         mcp::inspect_mcp_endpoint,
+        asset_index::import_asset_index,
+        asset_index::list_asset_vaults,
+        asset_index::list_asset_folders,
+        asset_index::list_asset_items,
         desktop::set_desktop_tray,
         #[cfg(all(
             any(target_os = "macos", target_os = "linux"),

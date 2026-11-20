@@ -4446,6 +4446,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "uebox-asset-index"
+version = "0.1.0"
+dependencies = [
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "uebox-chat-history"
 version = "0.1.0"
 dependencies = [
@@ -4583,6 +4593,7 @@ dependencies = [
  "uebox-agent-engine-tools",
  "uebox-agent-godot-tools",
  "uebox-agent-unity-tools",
+ "uebox-asset-index",
  "uebox-chat-history",
  "uebox-cli",
  "uebox-credentials",

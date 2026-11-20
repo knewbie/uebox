@@ -13,6 +13,7 @@ export type CapabilityId =
   | 'noteLibrary'
   | 'desktopPreferences'
   | 'mcpInspection'
+  | 'assetIndex'
   | 'settings'
 
 export interface HostStatus {

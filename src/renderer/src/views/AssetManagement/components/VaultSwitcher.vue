@@ -229,6 +229,13 @@
       >
         {{ t('vaultSwitcher.contextMenu.changeSaveLocation') }}
       </div>
+      <div
+        v-if="selectedVault && selectedVault.vaultType !== VaultType.NETWORK"
+        class="context-menu-item"
+        @click="handleExportLocalIndex"
+      >
+        {{ t('tauriPreview.assetIndex.exportTitle') }}
+      </div>
       <div v-if="!selectedVault?.isSystem" class="context-menu-divider"></div>
       <div
         v-if="!selectedVault?.isSystem"
@@ -1071,6 +1078,41 @@ const closeContextMenu = () => {
   contextMenuVisible.value = false
   serverMenuLibrary.value = null
   // 移除 selectedVault.value = null 的逻辑，避免后续操作获取不到选中的保管库
+}
+
+function handleExportLocalIndex(): void {
+  const vault = selectedVault.value
+  closeContextMenu()
+  if (!vault || vault.vaultType === VaultType.NETWORK) return
+  confirmDialog({
+    title: t('tauriPreview.assetIndex.exportTitle'),
+    content: t('tauriPreview.assetIndex.exportConfirm', { name: vault.name }),
+    onOk: async () => {
+      try {
+        const result = await window.api.assetIndex.exportLocalVault(vault.id)
+        if (result.success) {
+          message.success(
+            t(
+              result.indexAvailable
+                ? 'tauriPreview.assetIndex.exported'
+                : 'tauriPreview.assetIndex.exportedRegistration',
+              result
+            )
+          )
+        } else if (result.code !== 'cancelled') {
+          message.error(
+            t(
+              result.code === 'exists'
+                ? 'tauriPreview.assetIndex.exportExists'
+                : 'tauriPreview.assetIndex.exportFailed'
+            )
+          )
+        }
+      } catch {
+        message.error(t('tauriPreview.assetIndex.exportFailed'))
+      }
+    }
+  })
 }
 
 // 右键菜单操作

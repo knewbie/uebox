@@ -39,6 +39,7 @@ import type { RealtimeEchoGuard } from '../shared/realtimeEchoGuard'
 import type { NamingRulesSavePayload } from '../main/utils/namingRulesConfig'
 import type { ChatHistoryExportResult } from '../shared/chatHistoryTransfer'
 import type { NoteTransferReply } from '../shared/noteTransfer'
+import type { AssetIndexExportReply } from '../shared/assetIndexTransfer'
 import type { PortableModelExportReply } from '../shared/modelProfileTransfer'
 import type { ProjectRegistrationExportResult } from '../shared/projectRegistration'
 import type { ProjectCollectionsExportResult } from '../shared/projectCollectionsTransfer'
@@ -2955,6 +2956,10 @@ const api = {
    * 知识库 API
    * 本地存储知识库及来源数据
    */
+  assetIndex: {
+    exportLocalVault: (vaultId: string): Promise<AssetIndexExportReply> =>
+      ipcRenderer.invoke('vault:export-local-asset-index', vaultId)
+  },
   notebook: {
     exportOfflineNotes: (): Promise<NoteTransferReply> =>
       ipcRenderer.invoke('notebook:export-offline-notes'),

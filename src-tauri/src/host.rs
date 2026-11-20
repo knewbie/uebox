@@ -59,6 +59,7 @@ pub fn read_host_status() -> HostStatus {
             "noteLibrary",
             "desktopPreferences",
             "mcpInspection",
+            "assetIndex",
         ]
         .into_iter()
         .map(|id| Capability {
@@ -77,6 +78,7 @@ pub fn read_host_status() -> HostStatus {
                         | "legacyHistory"
                         | "modelSettings"
                         | "noteLibrary"
+                        | "assetIndex"
                 ) && cfg!(any(unix, windows))),
         })
         .collect(),

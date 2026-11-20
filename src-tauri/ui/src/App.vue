@@ -21,6 +21,7 @@ import ProjectLibraryPanel from './projects/ProjectLibraryPanel.vue'
 import AgentHistoryPanel from './history/AgentHistoryPanel.vue'
 import LegacyHistoryPanel from './legacy-history/LegacyHistoryPanel.vue'
 import ModelSettingsPanel from './settings/ModelSettingsPanel.vue'
+import AssetIndexPanel from './asset-index/AssetIndexPanel.vue'
 import McpPanel from './mcp/McpPanel.vue'
 import DesktopPanel from './desktop/DesktopPanel.vue'
 import NotesPanel from './notes/NotesPanel.vue'
@@ -48,6 +49,9 @@ const projectCollectionsAvailable = computed(() =>
 )
 const settingsAvailable = computed(() =>
   status.value?.capabilities.some(({ id, available }) => id === 'modelSettings' && available)
+)
+const assetIndexAvailable = computed(() =>
+  status.value?.capabilities.some(({ id, available }) => id === 'assetIndex' && available)
 )
 const mcpAvailable = computed(() =>
   status.value?.capabilities.some(({ id, available }) => id === 'mcpInspection' && available)
@@ -162,6 +166,11 @@ onUnmounted(() => colorScheme.removeEventListener('change', onColorSchemeChange)
             </a>
           </li>
           <li v-else><PhGear aria-hidden="true" />{{ t('tauriPreview.capabilities.settings') }}</li>
+          <li v-if="assetIndexAvailable" class="navigation-link">
+            <a href="#asset-index">
+              <PhArchive aria-hidden="true" />{{ t('tauriPreview.assetIndex.title') }}
+            </a>
+          </li>
           <li v-if="nativeCliAvailable" class="navigation-link">
             <a href="#native-cli">
               <PhTerminalWindow aria-hidden="true" />{{ t('tauriPreview.nativeCli.title') }}
@@ -265,6 +274,7 @@ onUnmounted(() => colorScheme.removeEventListener('change', onColorSchemeChange)
         <NativeCliPanel v-if="nativeCliAvailable" />
         <DesktopPanel v-if="desktopAvailable" />
         <McpPanel v-if="mcpAvailable" />
+        <AssetIndexPanel v-if="assetIndexAvailable" />
 
         <UnrealPanel
           v-if="!status || status.engineModules?.unreal === true"

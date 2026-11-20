@@ -39,6 +39,7 @@ const crates = [
   'crates/uebox-cli/Cargo.toml',
   'crates/uebox-notes/Cargo.toml',
   'crates/uebox-mcp-client/Cargo.toml',
+  'crates/uebox-asset-index/Cargo.toml',
   'src-tauri/Cargo.toml'
 ]
 
