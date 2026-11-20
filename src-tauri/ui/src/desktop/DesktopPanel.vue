@@ -6,9 +6,11 @@ import AppAlert from '@renderer/components/AppAlert.vue'
 import AppButton from '@renderer/components/AppButton.vue'
 import ScreenRecorderPanel from './ScreenRecorderPanel.vue'
 import BrowserPanel from '../browser/BrowserPanel.vue'
+import WindowShortcut from './WindowShortcut.vue'
 
 const { t, locale } = useI18n()
 const tray = ref<boolean | null>(null)
+const editingShortcut = ref(false)
 const busy = ref(false)
 const error = ref(false)
 
@@ -42,6 +44,14 @@ onMounted(() => update())
     <AppButton v-if="tray !== null" :disabled="busy" :aria-pressed="tray" @click="update(!tray)">
       {{ t(tray ? 'tauriPreview.desktop.disableTray' : 'tauriPreview.desktop.enableTray') }}
     </AppButton>
+    <AppButton
+      :aria-expanded="editingShortcut"
+      data-desktop-shortcut
+      @click="editingShortcut = !editingShortcut"
+    >
+      {{ t('tauriPreview.desktop.shortcut.configure') }}
+    </AppButton>
+    <WindowShortcut v-if="editingShortcut" />
     <BrowserPanel />
     <ScreenRecorderPanel />
   </section>

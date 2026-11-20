@@ -6,7 +6,7 @@ export default {
       'This entry is being migrated to a Rust host. Use the existing Electron application for existing features.',
     warning: 'This preview cannot replace the existing app yet',
     warningDetail:
-      'Unreal and Unity have limited read-only queries; full engine support, the AI assistant, libraries, and settings are not connected yet.',
+      'Unreal Engine, Unity, and Godot have dedicated editor connections and assistants. Engine tools and data imports are still being expanded.',
     hostTitle: 'Local host',
     hostDetail: 'This information comes from the Rust process running this window.',
     loading: 'Reading host information…',
@@ -441,6 +441,24 @@ export default {
       }
     },
     desktop: {
+      shortcut: {
+        configure: 'Configure the window shortcut',
+        title: 'Main window shortcut',
+        capture: 'Focus this field and press a key combination',
+        control: 'Ctrl',
+        option: 'Alt / Option',
+        shift: 'Shift',
+        command: 'Command / Windows',
+        space: 'Space',
+        apply: 'Enable shortcut',
+        disable: 'Turn off shortcut',
+        active: 'Show or hide the main window with {keys}.',
+        errors: {
+          desktop_shortcut_invalid: 'Use Ctrl, Alt, or Command with the key.',
+          desktop_shortcut_occupied: 'The system could not register that shortcut.',
+          desktop_shortcut_unavailable: 'Global shortcuts are unavailable.'
+        }
+      },
       capture: {
         title: 'Screen recording',
         intro:

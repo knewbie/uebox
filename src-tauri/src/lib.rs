@@ -4,6 +4,8 @@ mod chat_history;
 mod desktop;
 mod desktop_browser;
 mod desktop_files;
+#[cfg(any(target_os = "macos", target_os = "linux", windows))]
+mod desktop_shortcut;
 #[cfg(feature = "godot")]
 mod godot;
 #[cfg(feature = "godot")]
@@ -62,6 +64,8 @@ pub fn configure_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> taur
         .manage(desktop::DesktopState::default())
         .on_menu_event(desktop::menu_event)
         .on_window_event(desktop::window_event);
+    #[cfg(any(target_os = "macos", target_os = "linux", windows))]
+    let builder = builder.manage(desktop_shortcut::ShortcutPreference::default());
     #[cfg(feature = "godot")]
     let builder = builder
         .manage(godot::GodotSessions::default())
@@ -106,6 +110,10 @@ pub fn configure_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> taur
         tauri::generate_handler![
             host::host_status,
             desktop::desktop_tray,
+            #[cfg(any(target_os = "macos", target_os = "linux", windows))]
+            desktop_shortcut::desktop_window_shortcut,
+            #[cfg(any(target_os = "macos", target_os = "linux", windows))]
+            desktop_shortcut::set_desktop_window_shortcut,
             desktop_files::open_registered_project_folder,
             desktop_browser::open_isolated_browser,
             browser::open_browser_window,
@@ -251,6 +259,13 @@ pub fn configure_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> taur
 
 pub fn run() {
     let app = configure_commands(tauri::Builder::default())
+        .setup(|app| {
+            #[cfg(any(target_os = "macos", target_os = "linux", windows))]
+            let _ = app
+                .handle()
+                .plugin(tauri_plugin_global_shortcut::Builder::new().build());
+            Ok(())
+        })
         .build(tauri::generate_context!())
         .expect("failed to build the Tauri host");
     #[cfg(target_os = "macos")]

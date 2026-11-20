@@ -269,13 +269,15 @@ describe('Tauri migration preview', () => {
     const wrapper = mount(App, { global: { plugins: [createAppI18n('en-US')] } })
     await flushPromises()
     expect(wrapper.get('[data-engine-unavailable="unreal"]').text()).toContain('Not yet available')
-    expect(wrapper.text()).not.toContain('Unreal and Unity have limited read-only queries')
+    expect(wrapper.text()).not.toContain(
+      'Unreal Engine, Unity, and Godot have dedicated editor connections'
+    )
     expect(wrapper.find('[data-unreal-start]').exists()).toBe(false)
     expect(wrapper.find('[data-unity-query]').exists()).toBe(true)
     expect(startUnrealListener).not.toHaveBeenCalled()
     await wrapper.get('button[lang="zh-CN"]').trigger('click')
     expect(wrapper.get('[data-engine-unavailable="unreal"]').text()).toContain('尚不可用')
-    expect(wrapper.text()).not.toContain('Unreal 和 Unity 仅支持有限的只读查询')
+    expect(wrapper.text()).not.toContain('Unreal Engine、Unity 和 Godot')
     wrapper.unmount()
   })
 
@@ -287,7 +289,9 @@ describe('Tauri migration preview', () => {
     const wrapper = mount(App, { global: { plugins: [createAppI18n('en-US')] } })
     await flushPromises()
     expect(wrapper.get('[data-engine-unavailable="unity"]').text()).toContain('Not yet available')
-    expect(wrapper.text()).not.toContain('Unreal and Unity have limited read-only queries')
+    expect(wrapper.text()).not.toContain(
+      'Unreal Engine, Unity, and Godot have dedicated editor connections'
+    )
     expect(wrapper.find('[data-unity-query]').exists()).toBe(false)
     expect(wrapper.find('[data-unreal-start]').exists()).toBe(true)
     expect(inspectUnity).not.toHaveBeenCalled()
@@ -664,7 +668,9 @@ describe('Tauri migration preview', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('Migration in progress')
-    expect(wrapper.text()).toContain('Unreal and Unity have limited read-only queries')
+    expect(wrapper.text()).toContain(
+      'Unreal Engine, Unity, and Godot have dedicated editor connections'
+    )
     expect(wrapper.text()).toContain('4321')
     expect(wrapper.text()).toContain('macos')
     expect(wrapper.text()).toContain('aarch64')

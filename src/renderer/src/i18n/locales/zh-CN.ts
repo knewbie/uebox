@@ -5,7 +5,7 @@ export default {
     description: '此入口正在迁移到 Rust 宿主。请继续使用 Electron 版本访问现有功能。',
     warning: '预览版尚不能替代现有应用',
     warningDetail:
-      'Unreal 和 Unity 仅支持有限的只读查询；完整引擎功能、AI 助手、资料库和设置尚未接入。',
+      'Unreal Engine、Unity 和 Godot 已接入独立的编辑器连接与助手。引擎工具和旧数据导入仍在逐步完善。',
     hostTitle: '本机宿主',
     hostDetail: '以下信息由运行此窗口的 Rust 进程提供。',
     loading: '正在读取宿主信息…',
@@ -428,6 +428,24 @@ export default {
       }
     },
     desktop: {
+      shortcut: {
+        configure: '配置主窗口快捷键',
+        title: '主窗口快捷键',
+        capture: '选中此输入框后按下组合键',
+        control: 'Ctrl',
+        option: 'Alt / Option',
+        shift: 'Shift',
+        command: 'Command / Windows',
+        space: '空格',
+        apply: '启用快捷键',
+        disable: '停用快捷键',
+        active: '按 {keys} 显示或隐藏主窗口。',
+        errors: {
+          desktop_shortcut_invalid: '请搭配 Ctrl、Alt 或 Command 键。',
+          desktop_shortcut_occupied: '系统未能注册此快捷键。',
+          desktop_shortcut_unavailable: '全局快捷键不可用。'
+        }
+      },
       capture: {
         title: '录屏',
         intro: '通过系统选择器选择窗口或屏幕。录制完成后将保存为 MP4 文件。',
