@@ -27,7 +27,7 @@ tauri-build = { version = "2", features = [] }
 base64 = "0.22"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["tray-icon"] }
 uebox-credentials = { path = "../crates/uebox-credentials" }
 uebox-chat-history = { path = "../crates/uebox-chat-history" }
 uebox-legacy-history = { path = "../crates/uebox-legacy-history" }

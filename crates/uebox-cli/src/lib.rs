@@ -193,10 +193,13 @@ async fn execute(
         }
         command => command,
     };
-    let endpoint = options.endpoint.as_deref().ok_or(Fault::ConfigMissing)?;
+    let endpoint = options
+        .endpoint
+        .or_else(|| connector.default_endpoint())
+        .ok_or(Fault::ConfigMissing)?;
     let doctor = matches!(command, Command::Doctor { .. });
     let host = deadline
-        .host(async { connector.connect(endpoint).await })
+        .host(async { connector.connect(&endpoint).await })
         .await?;
     if doctor {
         stderr.push_str("connection: ok\n");

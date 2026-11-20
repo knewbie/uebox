@@ -57,6 +57,7 @@ pub fn read_host_status() -> HostStatus {
             "legacyHistory",
             "nativeCli",
             "noteLibrary",
+            "desktopPreferences",
         ]
         .into_iter()
         .map(|id| Capability {
@@ -66,6 +67,7 @@ pub fn read_host_status() -> HostStatus {
                     any(target_os = "macos", target_os = "linux"),
                     any(feature = "unity", feature = "unreal", feature = "godot")
                 )))
+                || id == "desktopPreferences"
                 || (matches!(
                     id,
                     "projectRegistration"

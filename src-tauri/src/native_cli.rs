@@ -5,8 +5,9 @@ use serde::Serialize;
 use tauri::{AppHandle, Manager, Runtime};
 use tokio::sync::oneshot;
 use uebox_cli::{
-    unix::UnixServer, Capabilities, Dispatch, HostError, HostFuture, HostSession, OnlineProject,
-    ReadTool, ToolReply, CLI_CONTRACT_VERSION,
+    unix::{UnixServer, ENDPOINT_DIRECTORY},
+    Capabilities, Dispatch, HostError, HostFuture, HostSession, OnlineProject, ReadTool, ToolReply,
+    CLI_CONTRACT_VERSION,
 };
 
 use crate::profile_storage::{private_directory, ProfileError};
@@ -66,7 +67,7 @@ pub(crate) async fn start_native_cli<R: Runtime>(
     }
     let root = profile_root(&app, &host)?;
     let directory = tauri::async_runtime::spawn_blocking(move || {
-        private_directory(&root, "cli", true)
+        private_directory(&root, ENDPOINT_DIRECTORY, true)
             .map_err(|error| match error {
                 ProfileError::Invalid => "native_cli_endpoint_invalid",
                 _ => "native_cli_unavailable",
@@ -243,6 +244,13 @@ mod tests {
     use uebox_engine_unreal::UnrealBridge;
 
     use super::*;
+
+    #[test]
+    fn command_line_discovery_uses_the_application_identifier() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        assert_eq!(config["identifier"], uebox_cli::unix::APP_IDENTIFIER);
+    }
 
     #[tokio::test]
     async fn native_console_uses_real_socket_and_fixed_read_only_unreal_target() {

@@ -11,6 +11,7 @@ export type CapabilityId =
   | 'modelSettings'
   | 'nativeCli'
   | 'noteLibrary'
+  | 'desktopPreferences'
   | 'settings'
 
 export interface HostStatus {

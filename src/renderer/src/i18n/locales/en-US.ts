@@ -24,6 +24,7 @@ export default {
       agent: 'AI assistant',
       libraries: 'Project and content libraries',
       settings: 'Application settings',
+      desktopPreferences: 'Desktop preferences',
       noteLibrary: 'Offline notes',
       nativeCli: 'Native CLI',
       modelSettings: 'Model settings',
@@ -313,6 +314,15 @@ export default {
       confirmDeleteNotebook:
         'Delete notebook “{title}” and all notes inside it? Standalone notes will be kept.',
       approveDelete: 'Confirm deletion'
+    },
+    desktop: {
+      title: 'Desktop preferences',
+      trayDetail:
+        'Keep UEBox in the system tray when you close the main window. Use the tray menu to show the window or quit.',
+      enableTray: 'Enable system tray',
+      disableTray: 'Disable system tray',
+      trayError: 'Unable to change the system tray.',
+      retry: 'Retry'
     },
     nativeCli: {
       title: 'Native CLI',

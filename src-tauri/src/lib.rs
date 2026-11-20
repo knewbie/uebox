@@ -1,4 +1,5 @@
 mod chat_history;
+mod desktop;
 #[cfg(feature = "godot")]
 mod godot;
 #[cfg(feature = "godot")]
@@ -37,7 +38,10 @@ pub fn configure_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> taur
         .manage(chat_history::ChatHistoryHost::default())
         .manage(legacy_history::LegacyHistoryHost::default())
         .manage(settings::ModelSettings::default())
-        .manage(notes::NotesHost::default());
+        .manage(notes::NotesHost::default())
+        .manage(desktop::DesktopState::default())
+        .on_menu_event(desktop::menu_event)
+        .on_window_event(desktop::window_event);
     #[cfg(feature = "godot")]
     let builder = builder.manage(godot::GodotSessions::default());
     #[cfg(feature = "unity")]
@@ -61,6 +65,8 @@ pub fn configure_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> taur
     let builder = builder.manage(native_cli::NativeCli::default());
     builder.invoke_handler(tauri::generate_handler![
         host::host_status,
+        desktop::desktop_tray,
+        desktop::set_desktop_tray,
         #[cfg(all(
             any(target_os = "macos", target_os = "linux"),
             any(feature = "unreal", feature = "unity", feature = "godot")
@@ -180,6 +186,16 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("failed to build the Tauri host");
     app.run(|_handle, _event| {
+        #[cfg(target_os = "macos")]
+        if matches!(
+            _event,
+            tauri::RunEvent::Reopen {
+                has_visible_windows: false,
+                ..
+            }
+        ) {
+            desktop::reveal(_handle);
+        }
         #[cfg(all(
             any(target_os = "macos", target_os = "linux"),
             any(feature = "unreal", feature = "unity", feature = "godot")

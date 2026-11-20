@@ -23,6 +23,7 @@ export default {
       agent: 'AI 助手',
       libraries: '项目库与资料库',
       settings: '应用设置',
+      desktopPreferences: '桌面偏好设置',
       noteLibrary: '离线笔记',
       nativeCli: '原生 CLI',
       modelSettings: '模型设置',
@@ -303,6 +304,14 @@ export default {
       confirmDeleteNote: '确认删除「{title}」及其已保存正文？',
       confirmDeleteNotebook: '确认删除笔记本「{title}」及其全部笔记？独立笔记会保留。',
       approveDelete: '确认删除'
+    },
+    desktop: {
+      title: '桌面偏好设置',
+      trayDetail: '启用后关闭主窗口会将虚幻盒子留在系统托盘，可从托盘菜单恢复窗口或退出。',
+      enableTray: '启用系统托盘',
+      disableTray: '停用系统托盘',
+      trayError: '无法更改系统托盘设置。',
+      retry: '重试'
     },
     nativeCli: {
       title: '原生 CLI',

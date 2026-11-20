@@ -30,15 +30,27 @@ use path::{authenticate, io_error, Endpoint, SocketGuard};
 use wire::{Request, Response, MAX_REQUEST, MAX_RESPONSE};
 
 pub const SOCKET_NAME: &str = "uebox.sock";
+pub const APP_IDENTIFIER: &str = "com.uebox.tauri-preview";
+pub const ENDPOINT_DIRECTORY: &str = "cli";
 const MAX_SESSIONS: usize = 32;
 const IO_TIMEOUT: Duration = Duration::from_secs(30);
 const WORK_TIMEOUT: Duration = Duration::from_secs(3600);
 
-/// The explicit endpoint is the absolute, existing, same-user 0700 runtime directory.
+/// The endpoint is the absolute, existing, same-user 0700 runtime directory.
 /// The connector verifies the filesystem identity and kernel peer UID before sending a frame.
 pub struct UnixConnector;
 
 impl Connector for UnixConnector {
+    fn default_endpoint(&self) -> Option<String> {
+        dirs::data_local_dir()
+            .filter(|directory| directory.is_absolute())?
+            .join(APP_IDENTIFIER)
+            .join(ENDPOINT_DIRECTORY)
+            .into_os_string()
+            .into_string()
+            .ok()
+    }
+
     fn connect<'a>(&'a self, endpoint: &'a str) -> HostFuture<'a, Box<dyn HostSession + 'a>> {
         Box::pin(async move {
             let directory = PathBuf::from(endpoint);

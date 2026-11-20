@@ -15,6 +15,10 @@ pub type HostFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, HostError>> +
 /// A transport authenticates the peer here, before opening a session.
 /// Connector and session methods must be nonblocking and cancellation-safe when their futures drop.
 pub trait Connector: Sync {
+    fn default_endpoint(&self) -> Option<String> {
+        None
+    }
+
     fn connect<'a>(&'a self, endpoint: &'a str) -> HostFuture<'a, Box<dyn HostSession + 'a>>;
 }
 

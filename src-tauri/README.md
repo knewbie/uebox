@@ -228,13 +228,21 @@ The console can show help and its version while the app is closed.
 
 在 macOS 与 Linux 构建中，从「原生 CLI」启动进程内只读入口，使用界面显示的目录。
 服务器校验本机用户身份，按编译选项公开五种固定读取操作，并只查询已经连接的编辑器。
+控制台默认从当前用户的 Tauri 数据目录发现端点，也可以传入 `--endpoint` 指定窗口显示的目录。
 应用未启动时，控制台仍可显示帮助与版本。
 
 ```sh
 cargo build --locked --manifest-path crates/uebox-cli/Cargo.toml --release
-crates/uebox-cli/target/release/uebox --endpoint "/directory/shown/in/UEBox" doctor --json
+crates/uebox-cli/target/release/uebox doctor --json
 crates/uebox-cli/target/release/uebox --endpoint "/directory/shown/in/UEBox" projects list --json
 ```
+
+### System tray / 系统托盘
+
+In Desktop preferences, enable the tray for the current application session.
+Closing the main window then hides it. Use the tray menu to show the window or quit.
+Disabling the tray restores normal close behavior. On macOS, clicking the Dock
+icon also reopens the hidden window.
 
 ### Project registrations / 项目登记
 

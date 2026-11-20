@@ -18,12 +18,17 @@ struct Fixture {
     generation: Option<&'static str>,
     bad_contract: bool,
     auth_failed: bool,
+    default_endpoint: Option<&'static str>,
     projects: Option<Vec<OnlineProject>>,
     call_error: Option<HostError>,
     calls: Mutex<Vec<ReadTool>>,
 }
 
 impl Connector for Fixture {
+    fn default_endpoint(&self) -> Option<String> {
+        self.default_endpoint.map(str::to_owned)
+    }
+
     fn connect<'a>(&'a self, endpoint: &'a str) -> HostFuture<'a, Box<dyn HostSession + 'a>> {
         Box::pin(async move {
             assert_eq!(endpoint, "fixture-private-endpoint");
@@ -123,7 +128,7 @@ fn argv(values: &[&str]) -> Vec<String> {
 }
 
 #[test]
-fn binary_starts_with_an_empty_environment_and_distinguishes_missing_endpoint() {
+fn binary_starts_with_an_empty_environment_and_reports_unreachable_endpoint() {
     let binary = env!("CARGO_BIN_EXE_uebox");
     for command in ["--help", "--version"] {
         let output = Command::new(binary)
@@ -141,25 +146,16 @@ fn binary_starts_with_an_empty_environment_and_distinguishes_missing_endpoint() 
         .canonicalize()
         .unwrap()
         .join("secret-fixture-address");
-    for (args, exit, error) in [
-        (vec!["doctor", "--json"], 3, "CONFIG_MISSING"),
-        (
-            vec!["doctor", "--endpoint", missing.to_str().unwrap()],
-            4,
-            "SERVICE_UNAVAILABLE",
-        ),
-    ] {
-        let output = Command::new(binary)
-            .env_clear()
-            .args(args)
-            .output()
-            .unwrap();
-        let stdout = String::from_utf8(output.stdout).unwrap();
-        assert_eq!(output.status.code(), Some(exit));
-        assert_eq!(decode(&stdout)["error"]["code"], error);
-        assert!(!stdout.contains("secret-fixture-address"));
-        assert!(!String::from_utf8_lossy(&output.stderr).contains("secret-fixture-address"));
-    }
+    let output = Command::new(binary)
+        .env_clear()
+        .args(["doctor", "--endpoint", missing.to_str().unwrap()])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert_eq!(output.status.code(), Some(4));
+    assert_eq!(decode(&stdout)["error"]["code"], "SERVICE_UNAVAILABLE");
+    assert!(!stdout.contains("secret-fixture-address"));
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("secret-fixture-address"));
 }
 
 #[tokio::test]
@@ -376,4 +372,28 @@ async fn a_lost_read_is_unknown_and_is_never_retried() {
     assert_eq!(output.exit_code, 4);
     assert_eq!(decode(&output.stdout)["error"]["execution"], "unknown");
     assert_eq!(fixture.calls.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn endpoint_override_precedes_native_discovery() {
+    let args = ["projects".into(), "list".into(), "--json".into()];
+    let missing = run(&args, Path::new("."), &Fixture::default()).await;
+    assert_eq!(decode(&missing.stdout)["error"]["code"], "CONFIG_MISSING");
+
+    let candidate = "fixture-private-endpoint";
+    let fixture = Fixture {
+        default_endpoint: Some(candidate),
+        ..Fixture::default()
+    };
+    let result = run(&args, Path::new("."), &fixture).await;
+    assert_eq!(result.exit_code, 0);
+
+    let fixture = Fixture {
+        default_endpoint: Some("should-not-be-used"),
+        ..Fixture::default()
+    };
+    let mut args = args.to_vec();
+    args.extend(["--endpoint".into(), candidate.into()]);
+    let result = run(&args, Path::new("."), &fixture).await;
+    assert_eq!(result.exit_code, 0);
 }

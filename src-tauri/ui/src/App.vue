@@ -21,6 +21,7 @@ import ProjectLibraryPanel from './projects/ProjectLibraryPanel.vue'
 import AgentHistoryPanel from './history/AgentHistoryPanel.vue'
 import LegacyHistoryPanel from './legacy-history/LegacyHistoryPanel.vue'
 import ModelSettingsPanel from './settings/ModelSettingsPanel.vue'
+import DesktopPanel from './desktop/DesktopPanel.vue'
 import NotesPanel from './notes/NotesPanel.vue'
 import NativeCliPanel from './native-cli/NativeCliPanel.vue'
 import type { Locale } from './i18n'
@@ -46,6 +47,9 @@ const projectCollectionsAvailable = computed(() =>
 )
 const settingsAvailable = computed(() =>
   status.value?.capabilities.some(({ id, available }) => id === 'modelSettings' && available)
+)
+const desktopAvailable = computed(() =>
+  status.value?.capabilities.some(({ id, available }) => id === 'desktopPreferences' && available)
 )
 const noteLibraryAvailable = computed(() =>
   status.value?.capabilities.some(({ id, available }) => id === 'noteLibrary' && available)
@@ -255,6 +259,7 @@ onUnmounted(() => colorScheme.removeEventListener('change', onColorSchemeChange)
         <ModelSettingsPanel v-if="settingsAvailable" />
         <NotesPanel v-if="noteLibraryAvailable" />
         <NativeCliPanel v-if="nativeCliAvailable" />
+        <DesktopPanel v-if="desktopAvailable" />
 
         <UnrealPanel
           v-if="!status || status.engineModules?.unreal === true"
