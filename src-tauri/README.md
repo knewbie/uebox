@@ -220,6 +220,14 @@ current collection records intact.
 
 ### Native CLI / 原生 CLI
 
+`pnpm tauri:cli:build` builds a native CLI archive in `dist/native-cli/`
+for the current Rust host target. It contains the executable, usage
+instructions and license. Extract the archive and add its directory to your
+account's PATH, or call the executable by its full path.
+
+`pnpm tauri:cli:build` 在 `dist/native-cli/` 生成当前 Rust 系统架构的 CLI 压缩包，
+包含可执行文件、使用说明和许可证。解压后将该目录加入用户 PATH，或使用绝对路径调用。
+
 Use **Native CLI → Start CLI endpoint** to start the in-process read-only
 server. macOS and Linux use a Unix socket. Windows uses a local named pipe.
 The server authenticates the local system user, accepts the compiled editor

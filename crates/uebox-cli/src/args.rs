@@ -209,9 +209,9 @@ pub(crate) fn parse(argv: &[String]) -> Result<Options, Fault> {
 
 pub(crate) fn help(english: bool) -> String {
     let intro = if english {
-        "Unreal Box read-only console. On macOS and Linux, --endpoint is a private Unix socket directory."
+        "Unreal Box read-only console. --endpoint accepts the private socket directory on macOS and Linux or the local named pipe on Windows."
     } else {
-        "虚幻盒子只读控制台。macOS 和 Linux 上的 --endpoint 指定 Unix socket 私有目录。"
+        "虚幻盒子只读控制台。--endpoint 在 macOS 和 Linux 上指定私有套接字目录，在 Windows 上指定本机命名管道。"
     };
     format!("{intro}\n\nuebox [--json] [--endpoint <endpoint>] [--timeout <seconds>]\n  --help | --version\n  doctor [--project <path>]\n  projects list\n  tools list [--search <text>]\n  tools show <name>\n  tools call <name> [--project <path>] [--args '{{}}' | --args-file <path|->]\n  ask <question> --model <registered-profile-id> [--project <path>]\n\n--lang zh-CN|en-US\n")
 }
