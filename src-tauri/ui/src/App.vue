@@ -1,7 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { PhBookOpen, PhChatCircleDots, PhFolderSimple, PhGear } from '@phosphor-icons/vue'
+import {
+  PhBookOpen,
+  PhChatCircleDots,
+  PhClockCounterClockwise,
+  PhFolderSimple,
+  PhGear
+} from '@phosphor-icons/vue'
 import AppAlert from '@renderer/components/AppAlert.vue'
 import AppButton from '@renderer/components/AppButton.vue'
 import BrandMark from '@renderer/components/BrandMark.vue'
@@ -10,6 +16,7 @@ import UnityPanel from './engines/unity/UnityPanel.vue'
 import UnrealPanel from './engines/unreal/UnrealPanel.vue'
 import GodotPanel from './engines/godot/GodotPanel.vue'
 import ProjectLibraryPanel from './projects/ProjectLibraryPanel.vue'
+import AgentHistoryPanel from './history/AgentHistoryPanel.vue'
 import type { Locale } from './i18n'
 
 type ThemePreference = 'system' | 'light' | 'dark'
@@ -21,6 +28,9 @@ const projectRegistrationAvailable = computed(() =>
   status.value?.capabilities.some(
     ({ id, available }) => id === 'projectRegistration' && available === true
   )
+)
+const chatHistoryAvailable = computed(() =>
+  status.value?.capabilities.some(({ id, available }) => id === 'chatHistory' && available)
 )
 function readTheme(): ThemePreference {
   try {
@@ -103,6 +113,11 @@ onUnmounted(() => colorScheme.removeEventListener('change', onColorSchemeChange)
           </li>
           <li v-else><PhFolderSimple aria-hidden="true" />{{ t('menu.projectLib') }}</li>
           <li><PhChatCircleDots aria-hidden="true" />{{ t('menu.aiAssistant') }}</li>
+          <li v-if="chatHistoryAvailable" class="navigation-link">
+            <a href="#agent-history">
+              <PhClockCounterClockwise aria-hidden="true" />{{ t('tauriPreview.history.title') }}
+            </a>
+          </li>
           <li><PhBookOpen aria-hidden="true" />{{ t('menu.notebooks') }}</li>
           <li><PhGear aria-hidden="true" />{{ t('tauriPreview.capabilities.settings') }}</li>
         </ul>
@@ -193,6 +208,7 @@ onUnmounted(() => colorScheme.removeEventListener('change', onColorSchemeChange)
         </section>
 
         <ProjectLibraryPanel v-if="projectRegistrationAvailable" />
+        <AgentHistoryPanel v-if="chatHistoryAvailable" />
 
         <UnrealPanel
           v-if="!status || status.engineModules?.unreal === true"

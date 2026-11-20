@@ -18,6 +18,7 @@ interface Receipt {
   approvalId: string
   status: 'applied' | 'mismatch' | 'not_executed' | 'unknown'
   actualLabel: string | null
+  historyError?: string
 }
 interface ActorApprovalSnapshot {
   approvals: Proposal[]
@@ -132,6 +133,9 @@ async function answer(approvalId: string, allowed: boolean): Promise<void> {
             label: receipt.actualLabel
           })
         }}
+        <span v-if="receipt.historyError">
+          {{ t('tauriPreview.unreal.actorApproval.historyError') }}
+        </span>
       </li>
     </ul>
   </section>

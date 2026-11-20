@@ -341,6 +341,11 @@ impl AgentSession {
             finished: false,
         })
     }
+    /// Check whether a run or its admitted tool still owns the session.
+    pub fn has_active_run(&self) -> bool {
+        self.inner.state.lock().unwrap().active.is_some()
+    }
+
     pub fn snapshot(&self) -> SessionSnapshot {
         let state = self.inner.state.lock().unwrap();
         SessionSnapshot {

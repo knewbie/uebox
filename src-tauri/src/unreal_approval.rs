@@ -7,6 +7,8 @@ use std::{
 };
 use tokio::sync::oneshot;
 
+use crate::chat_history::RecordedTurn;
+
 const RECEIPT_LIMIT: usize = 128;
 
 #[derive(Clone, Serialize)]
@@ -28,6 +30,8 @@ pub(crate) struct Receipt {
     pub run_id: u64,
     pub status: &'static str,
     pub actual_label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub history_error: Option<&'static str>,
 }
 
 struct Pending {
@@ -43,6 +47,7 @@ struct State {
     receipts: VecDeque<(String, Receipt)>,
     writing: HashSet<PathBuf>,
     unresolved: HashSet<PathBuf>,
+    recordings: HashMap<(String, u64), RecordedTurn>,
 }
 
 #[derive(Default)]
@@ -118,12 +123,40 @@ impl ApprovalBook {
             .collect()
     }
 
-    pub(crate) fn record(&self, owner: String, receipt: Receipt) {
+    pub(crate) fn record(&self, owner: String, mut receipt: Receipt) {
+        let recording = self
+            .state()
+            .recordings
+            .get(&(receipt.agent_id.clone(), receipt.run_id))
+            .cloned();
+        if let Some(recording) = recording {
+            receipt.history_error = recording
+                .record_actor_label(
+                    &receipt.approval_id,
+                    receipt.status,
+                    receipt.actual_label.as_deref(),
+                )
+                .err();
+        }
         let mut state = self.state();
         if state.receipts.len() >= RECEIPT_LIMIT {
             state.receipts.pop_front();
         }
         state.receipts.push_back((owner, receipt));
+    }
+
+    pub(crate) fn record_run(
+        self: &Arc<Self>,
+        agent_id: String,
+        run_id: u64,
+        turn: RecordedTurn,
+    ) -> RecordedRun {
+        let key = (agent_id, run_id);
+        self.state().recordings.insert(key.clone(), turn);
+        RecordedRun {
+            book: Arc::clone(self),
+            key,
+        }
     }
 
     pub(crate) fn receipts(&self, owner: &str) -> Vec<Receipt> {
@@ -160,6 +193,17 @@ impl ApprovalBook {
             project: project.to_path_buf(),
             uncertain: true,
         })
+    }
+}
+
+pub(crate) struct RecordedRun {
+    book: Arc<ApprovalBook>,
+    key: (String, u64),
+}
+
+impl Drop for RecordedRun {
+    fn drop(&mut self) {
+        self.book.state().recordings.remove(&self.key);
     }
 }
 

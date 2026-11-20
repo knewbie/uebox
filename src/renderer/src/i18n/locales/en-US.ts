@@ -72,6 +72,53 @@ export default {
         generic: 'Unable to complete the project registration operation.'
       }
     },
+    history: {
+      title: 'Chat history',
+      intro: 'Open saved chats for read-only viewing.',
+      open: 'Open history',
+      close: 'Close history',
+      refresh: 'Refresh',
+      loadMore: 'Load more',
+      loadingList: 'Loading chats…',
+      listError: 'Unable to load chat history. Try again.',
+      emptyList: 'No saved chats.',
+      chats: 'Saved chats',
+      selectChat: 'Select a chat to view its turns.',
+      loadingChat: 'Loading chat…',
+      detailError: 'Unable to load this chat. Try again.',
+      retry: 'Retry',
+      untitled: 'Untitled chat',
+      engine: 'Engine',
+      createdAt: 'Created',
+      updatedAt: 'Updated',
+      finishedAt: 'Finished',
+      unfinished: 'Not finished',
+      turnTitle: 'Turn {number}',
+      user: 'You',
+      assistant: 'Assistant',
+      noAssistantText: 'No assistant response saved.',
+      emptyTurns: 'No turns saved in this chat.',
+      actorReceipts: {
+        title: 'Actor label receipts',
+        approvalId: 'Approval ID',
+        actualLabel: 'Read-back label',
+        noActualLabel: 'No label read back',
+        statuses: {
+          applied: 'Applied',
+          mismatch: 'Readback mismatch',
+          not_executed: 'Not executed',
+          unknown: 'Outcome unknown'
+        }
+      },
+      engines: { unreal: 'Unreal Engine', unity: 'Unity', godot: 'Godot' },
+      statuses: {
+        pending: 'Pending',
+        completed: 'Completed',
+        failed: 'Failed',
+        cancelled: 'Cancelled',
+        interrupted: 'Interrupted'
+      }
+    },
     editorAgent: {
       title: '{engine} read-only assistant preview',
       intro:
@@ -80,6 +127,7 @@ export default {
       endpoint: 'Full Chat Completions URL',
       model: 'Model name',
       credential: 'Bearer credential (optional, memory only)',
+      saveHistory: 'Save this chat to local history',
       create: 'Configure assistant',
       close: 'Close assistant',
       message: 'Message',
@@ -115,6 +163,12 @@ export default {
         agent_context_limit: 'The chat exceeds the request size limit.',
         agent_output_buffer_limit: 'The assistant output exceeded the pending display buffer.',
         credential_unavailable: 'The in-memory credential is no longer available.',
+        chat_history_unavailable: 'Chat history is unavailable.',
+        chat_history_invalid_input: 'The message cannot be saved to history.',
+        chat_history_active_turn: 'The previous saved response is still being finalized.',
+        chat_history_recovery_required: 'The history database needs recovery.',
+        chat_history_locked: 'Another application window or process is using this history.',
+        chat_history_invalid: 'The history database is invalid or uses an unsupported format.',
         generic: 'The operation failed. Check the {engine} connection and model configuration.'
       }
     },
@@ -162,6 +216,7 @@ export default {
         approve: 'Approve this label change',
         deny: 'Reject',
         unavailable: 'This approval has expired or is unavailable.',
+        historyError: 'The editor result could not be saved to chat history.',
         receipt: {
           applied:
             'The editor now reports the label “{label}”. Save the level in Unreal Engine when ready.',

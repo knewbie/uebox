@@ -211,6 +211,25 @@ describe('Tauri migration preview', () => {
     wrapper.unmount()
   })
 
+  it('loads conversation history only after opening it, even with no engines compiled', async () => {
+    vi.mocked(getHostStatus).mockResolvedValue({
+      ...actualHostStatus,
+      capabilities: [{ id: 'chatHistory', available: true }],
+      engineModules: { unity: false, unreal: false, godot: false }
+    })
+    vi.mocked(invoke).mockResolvedValue({ chats: [], nextOffset: null })
+    const wrapper = mount(App, { global: { plugins: [createAppI18n('en-US')] } })
+    await flushPromises()
+
+    expect(wrapper.get('nav a[href="#agent-history"]').text()).toBe('Chat history')
+    expect(invoke).not.toHaveBeenCalled()
+    await wrapper.get('[data-history-toggle]').trigger('click')
+    await flushPromises()
+    expect(invoke).toHaveBeenCalledExactlyOnceWith('list_agent_chats', { limit: 20, offset: 0 })
+    expect(wrapper.get('#agent-history').text()).toContain('No saved chats.')
+    wrapper.unmount()
+  })
+
   it.each([
     { capabilities: [] },
     { capabilities: [{ id: 'projectRegistration', available: false }] as const }

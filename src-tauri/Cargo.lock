@@ -4443,6 +4443,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "uebox-chat-history"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "rusqlite",
+ "tempfile",
+]
+
+[[package]]
 name = "uebox-engine-core"
 version = "0.1.0"
 
@@ -4506,6 +4515,7 @@ dependencies = [
  "uebox-agent-engine-tools",
  "uebox-agent-godot-tools",
  "uebox-agent-unity-tools",
+ "uebox-chat-history",
  "uebox-engine-core",
  "uebox-engine-unity",
  "uebox-engine-unreal",

@@ -183,6 +183,7 @@ fn record(book: &ApprovalBook, owner: &str, agent_id: &str, settlement: Mutation
             actual_label: settlement.receipt.data["actualLabel"]
                 .as_str()
                 .map(str::to_owned),
+            history_error: None,
         },
     );
 }

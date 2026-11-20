@@ -1,10 +1,11 @@
 //! One explicitly authorized socket per Unity target. Agent runs never reconnect.
+use crate::chat_history::{finish_recorded_run, start_recorded_run};
 use crate::unity::{local_target, UnityQueries};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
-use tauri::Runtime;
+use tauri::{Manager, Runtime};
 use uebox_agent_core::{
     AgentSession, Cancellation, Error, ModelEvent, OpenAiProvider, ProviderConfig,
 };
@@ -433,6 +434,7 @@ pub(crate) async fn start_unity_agent<R: Runtime>(
     window: tauri::WebviewWindow<R>,
     agent_id: String,
     text: String,
+    save_history: Option<bool>,
     queries: tauri::State<'_, UnityQueries>,
 ) -> Result<StartedRun, String> {
     if text.trim().is_empty() || text.len() > 64 * 1024 {
@@ -464,7 +466,7 @@ pub(crate) async fn start_unity_agent<R: Runtime>(
         target_id: &target_id,
     };
     let probe = tools.probe().await;
-    let run = {
+    let (run, recording) = {
         let mut state = lock(&host.state);
         match probe {
             ProbeState::Busy => return Err("agent_busy".into()),
@@ -476,7 +478,15 @@ pub(crate) async fn start_unity_agent<R: Runtime>(
         }
         let agent = state.live_agent(&agent_id, owner)?;
         let session = agent.session.as_ref().ok_or("agent_unavailable")?;
-        let run = session.start(text).map_err(error_code)?;
+        let (run, recording) = start_recorded_run(
+            window.app_handle(),
+            session,
+            &agent_id,
+            uebox_chat_history::Engine::Unity,
+            text,
+            save_history.unwrap_or(false),
+            error_code,
+        )?;
         agent.run = Some(ActiveRun {
             id: run.id(),
             cancellation: run.cancellation(),
@@ -486,13 +496,13 @@ pub(crate) async fn start_unity_agent<R: Runtime>(
             forced_error: None,
             cancelled: false,
         });
-        run
+        (run, recording)
     };
     drop(probe_gate);
     let run_id = run.id();
     let worker_id = agent_id.clone();
     tauri::async_runtime::spawn(async move {
-        let result = run
+        let outcome = run
             .execute(|ModelEvent::TextDelta(text)| {
                 if let Some(run) = lock(&host.state)
                     .agents
@@ -503,9 +513,8 @@ pub(crate) async fn start_unity_agent<R: Runtime>(
                     run.push(text);
                 }
             })
-            .await
-            .map(|_| ())
-            .map_err(error_code);
+            .await;
+        let result = finish_recorded_run(recording, outcome, error_code).await;
         {
             let mut state = lock(&host.state);
             if tools.is_retired() {

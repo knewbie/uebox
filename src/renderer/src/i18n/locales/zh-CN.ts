@@ -68,6 +68,53 @@ export default {
         generic: '无法完成项目登记操作。'
       }
     },
+    history: {
+      title: '对话历史',
+      intro: '打开已保存的对话，仅供只读查看。',
+      open: '打开历史',
+      close: '关闭历史',
+      refresh: '刷新',
+      loadMore: '加载更多',
+      loadingList: '正在加载对话…',
+      listError: '无法加载对话历史，请重试。',
+      emptyList: '暂无已保存的对话。',
+      chats: '已保存的对话',
+      selectChat: '选择一段对话以查看内容。',
+      loadingChat: '正在加载对话内容…',
+      detailError: '无法加载此对话，请重试。',
+      retry: '重试',
+      untitled: '未命名对话',
+      engine: '引擎',
+      createdAt: '创建时间',
+      updatedAt: '更新时间',
+      finishedAt: '结束时间',
+      unfinished: '尚未结束',
+      turnTitle: '第 {number} 轮',
+      user: '你',
+      assistant: '助手',
+      noAssistantText: '未保存助手回复。',
+      emptyTurns: '此对话尚无已保存的轮次。',
+      actorReceipts: {
+        title: 'Actor 标签回执',
+        approvalId: '审批 ID',
+        actualLabel: '回读标签',
+        noActualLabel: '未回读到标签',
+        statuses: {
+          applied: '已应用',
+          mismatch: '回读不匹配',
+          not_executed: '未执行',
+          unknown: '结果未知'
+        }
+      },
+      engines: { unreal: '虚幻引擎', unity: 'Unity', godot: 'Godot' },
+      statuses: {
+        pending: '处理中',
+        completed: '已完成',
+        failed: '失败',
+        cancelled: '已取消',
+        interrupted: '已中断'
+      }
+    },
     editorAgent: {
       title: '{engine} 只读助手预览',
       intro: '消息和从已连接编辑器读取的数据会发送到你配置的模型服务。',
@@ -75,6 +122,7 @@ export default {
       endpoint: '完整的 Chat Completions 地址',
       model: '模型名称',
       credential: 'Bearer 凭据（可选，仅保存在内存）',
+      saveHistory: '将本次对话保存到本机历史',
       create: '配置助手',
       close: '关闭助手',
       message: '消息',
@@ -110,6 +158,12 @@ export default {
         agent_context_limit: '对话已超出请求大小限制。',
         agent_output_buffer_limit: '助手输出超出了待显示缓冲区的大小限制。',
         credential_unavailable: '内存中的凭据已不可用。',
+        chat_history_unavailable: '对话历史当前不可用。',
+        chat_history_invalid_input: '这条消息无法保存到历史。',
+        chat_history_active_turn: '上一轮保存的回复仍在收尾。',
+        chat_history_recovery_required: '对话历史数据库需要恢复。',
+        chat_history_locked: '另一个应用窗口或进程正在使用对话历史。',
+        chat_history_invalid: '对话历史数据库无效或使用了不受支持的格式。',
         generic: '操作失败，请检查 {engine} 连接和模型配置。'
       }
     },
@@ -157,6 +211,7 @@ export default {
         approve: '批准本次标签变更',
         deny: '拒绝',
         unavailable: '此审批已过期或不可用。',
+        historyError: '编辑器结果未能保存到对话历史。',
         receipt: {
           applied: '编辑器读回标签「{label}」。请在 Unreal Engine 中确认并保存关卡。',
           mismatch: '编辑器读回了不同的标签「{label}」。请在 Unreal Engine 中检查该 Actor。',

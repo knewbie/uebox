@@ -31,9 +31,10 @@ export function createAgent(
 export function startAgent(
   engine: AgentEngine,
   agentId: string,
-  text: string
+  text: string,
+  saveHistory: boolean
 ): Promise<{ agentId: string; runId: number }> {
-  return invoke(`start_${engine}_agent`, { agentId, text })
+  return invoke(`start_${engine}_agent`, { agentId, text, ...(saveHistory ? { saveHistory } : {}) })
 }
 export function pollAgent(
   engine: AgentEngine,

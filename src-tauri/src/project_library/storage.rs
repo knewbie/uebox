@@ -1,7 +1,7 @@
-use std::{
-    fs::{self, DirBuilder, File, Metadata, OpenOptions, TryLockError},
-    io::ErrorKind,
-    path::{Path, PathBuf},
+use std::path::{Path, PathBuf};
+
+use crate::profile_storage::{
+    acquire_lock, checked_file_exists, private_directory, ProfileError, ProfileLock,
 };
 
 const INVALID: &str = "project_library_invalid";
@@ -10,20 +10,12 @@ const UNAVAILABLE: &str = "project_library_unavailable";
 #[derive(Debug)]
 pub(super) struct LockedStorage {
     database: PathBuf,
-    _lock: File,
+    _lock: ProfileLock,
 }
 
 impl LockedStorage {
     pub(super) fn database(&self) -> &Path {
         &self.database
-    }
-}
-
-impl Drop for LockedStorage {
-    fn drop(&mut self) {
-        // A child forked by another thread may briefly retain the descriptor
-        // before exec. Unlock when the operation ends even in that interval.
-        let _ = self._lock.unlock();
     }
 }
 
@@ -36,26 +28,20 @@ pub(super) fn lock_storage(
     app_local_data: &Path,
     create: bool,
 ) -> Result<Option<LockedStorage>, &'static str> {
-    if !app_local_data.is_absolute() {
-        return Err(INVALID);
-    }
-    if !ensure_directory(app_local_data, create, 0o022)? {
+    let Some(directory) =
+        private_directory(app_local_data, "project-library", create).map_err(storage_error)?
+    else {
         return Ok(None);
-    }
-    let directory = app_local_data.join("project-library");
-    if !ensure_directory(&directory, create, 0o077)? {
-        return Ok(None);
-    }
-
-    let lock = acquire_lock(&directory.join("library.lock"))?;
+    };
+    let lock = acquire_lock(&directory.join("library.lock")).map_err(storage_error)?;
     let database = directory.join("library.sqlite");
-    let has_database = checked_file_exists(&database)?;
-    if checked_file_exists(&directory.join("library.sqlite-wal"))?
-        || checked_file_exists(&directory.join("library.sqlite-shm"))?
+    let has_database = checked_file_exists(&database).map_err(storage_error)?;
+    if checked_file_exists(&directory.join("library.sqlite-wal")).map_err(storage_error)?
+        || checked_file_exists(&directory.join("library.sqlite-shm")).map_err(storage_error)?
     {
         return Err(INVALID);
     }
-    if checked_file_exists(&directory.join("library.sqlite-journal"))? {
+    if checked_file_exists(&directory.join("library.sqlite-journal")).map_err(storage_error)? {
         return Err(if has_database {
             "project_library_recovery_required"
         } else {
@@ -68,104 +54,11 @@ pub(super) fn lock_storage(
     }))
 }
 
-fn metadata_at(path: &Path) -> Result<Option<Metadata>, &'static str> {
-    match fs::symlink_metadata(path) {
-        Ok(metadata) => Ok(Some(metadata)),
-        Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
-        Err(_) => Err(UNAVAILABLE),
-    }
-}
-
-fn ensure_directory(path: &Path, create: bool, forbidden_mode: u32) -> Result<bool, &'static str> {
-    let metadata = match metadata_at(path)? {
-        Some(metadata) => metadata,
-        None if !create => return Ok(false),
-        None => {
-            let mut builder = DirBuilder::new();
-            builder.recursive(true);
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::DirBuilderExt;
-                builder.mode(0o700);
-            }
-            builder.create(path).map_err(|_| UNAVAILABLE)?;
-            metadata_at(path)?.ok_or(UNAVAILABLE)?
-        }
-    };
-    if !metadata.is_dir() || is_link(&metadata) || !mode_allows(&metadata, forbidden_mode) {
-        return Err(INVALID);
-    }
-    Ok(true)
-}
-
-fn is_link(metadata: &Metadata) -> bool {
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::MetadataExt;
-        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
-        metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
-    }
-    #[cfg(not(windows))]
-    {
-        metadata.is_symlink()
-    }
-}
-
-fn mode_allows(_metadata: &Metadata, _forbidden_mode: u32) -> bool {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt;
-        _metadata.mode() & _forbidden_mode == 0
-    }
-    #[cfg(not(unix))]
-    {
-        true
-    }
-}
-
-fn check_file(metadata: &Metadata) -> Result<(), &'static str> {
-    if !metadata.is_file() || is_link(metadata) || !mode_allows(metadata, 0o077) {
-        return Err(INVALID);
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt;
-        if metadata.nlink() != 1 {
-            return Err(INVALID);
-        }
-    }
-    Ok(())
-}
-
-fn checked_file_exists(path: &Path) -> Result<bool, &'static str> {
-    let Some(metadata) = metadata_at(path)? else {
-        return Ok(false);
-    };
-    check_file(&metadata)?;
-    Ok(true)
-}
-
-fn acquire_lock(path: &Path) -> Result<File, &'static str> {
-    checked_file_exists(path)?;
-    let mut options = OpenOptions::new();
-    options.read(true).write(true).create(true).truncate(false);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::OpenOptionsExt;
-        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
-        options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
-    }
-    let lock = options.open(path).map_err(|_| UNAVAILABLE)?;
-    check_file(&lock.metadata().map_err(|_| UNAVAILABLE)?)?;
-    match lock.try_lock() {
-        Ok(()) => Ok(lock),
-        Err(TryLockError::WouldBlock) => Err("project_library_locked"),
-        Err(TryLockError::Error(_)) => Err(UNAVAILABLE),
+fn storage_error(error: ProfileError) -> &'static str {
+    match error {
+        ProfileError::Invalid => INVALID,
+        ProfileError::Locked => "project_library_locked",
+        ProfileError::Unavailable => UNAVAILABLE,
     }
 }
 

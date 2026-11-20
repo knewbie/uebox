@@ -1,4 +1,5 @@
 //! Fixed-target Unreal Agent sessions on the existing listener.
+use crate::chat_history::{finish_recorded_run, start_recorded_run};
 use crate::unreal::UnrealListenerState;
 use crate::unreal_actor_tool::add_actor_tool;
 use crate::unreal_approval::{ApprovalBook, Proposal, Receipt};
@@ -399,14 +400,15 @@ pub(crate) async fn create_unreal_agent<R: Runtime>(
 }
 
 #[tauri::command]
-pub(crate) fn start_unreal_agent<R: Runtime>(
+pub(crate) async fn start_unreal_agent<R: Runtime>(
     window: WebviewWindow<R>,
     agent_id: String,
     text: String,
+    save_history: Option<bool>,
     state: tauri::State<'_, UnrealListenerState>,
 ) -> Result<StartedRun, String> {
     let host = Arc::clone(&state.agents);
-    let run = {
+    let (run, recording) = {
         let mut agents = lock(&host.agents);
         let agent = owned_agent(&mut agents, &agent_id, window.label())?;
         let live = agent
@@ -424,7 +426,15 @@ pub(crate) fn start_unreal_agent<R: Runtime>(
         if agent.run.as_ref().is_some_and(|run| run.result.is_none()) {
             return Err("agent_busy".into());
         }
-        let run = live.session.start(text).map_err(error_code)?;
+        let (run, recording) = start_recorded_run(
+            window.app_handle(),
+            &live.session,
+            &agent_id,
+            uebox_chat_history::Engine::Unreal,
+            text,
+            save_history.unwrap_or(false),
+            error_code,
+        )?;
         agent.run = Some(ActiveRun {
             id: run.id(),
             cancellation: run.cancellation(),
@@ -434,12 +444,17 @@ pub(crate) fn start_unreal_agent<R: Runtime>(
             queued_bytes: 0,
             forced_error: None,
         });
-        run
+        (run, recording)
     };
     let run_id = run.id();
     let task_id = agent_id.clone();
+    let receipt_log = recording.as_ref().map(|turn| {
+        host.approvals
+            .record_run(agent_id.clone(), run_id, turn.clone())
+    });
     tauri::async_runtime::spawn(async move {
-        let result = run
+        let _receipt_log = receipt_log;
+        let outcome = run
             .execute(|ModelEvent::TextDelta(text)| {
                 if let Some(run) = lock(&host.agents)
                     .get_mut(&task_id)
@@ -449,9 +464,8 @@ pub(crate) fn start_unreal_agent<R: Runtime>(
                     run.queue_text(text);
                 }
             })
-            .await
-            .map(|_| ())
-            .map_err(error_code);
+            .await;
+        let result = finish_recorded_run(recording, outcome, error_code).await;
         if let Some(run) = lock(&host.agents)
             .get_mut(&task_id)
             .and_then(|agent| agent.run.as_mut())

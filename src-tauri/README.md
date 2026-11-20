@@ -144,6 +144,22 @@ Actor。预览显示对象路径和新旧标签，在发起窗口逐次批准或
 当前宿主会阻止该工程后续标签修改。请先在编辑器确认结果，再开启新的宿主会话。
 回执保存在内存中。真实 UE 的插件构建与编辑器验证仍待完成。
 
+### Chat history / 对话历史
+
+Select **Save this chat to local history** before configuring an
+assistant. The Rust host stores the submitted user message before contacting
+the configured model. History records the assistant's final answer, the
+terminal status, and settled UE Actor label receipts. Open **Conversation
+history** to read the saved text. Open a new assistant session with a verified
+editor connection to continue working. The local history has a separate SQLite
+database and stores no provider credentials, connection tickets, or raw tools
+messages. When a host restarts, any unfinished turn is shown as interrupted.
+
+配置助手前选择「将本次对话保存到本机历史」。Rust 宿主先保存用户提问，再调用已配置的
+模型。历史保留助手最终回复、轮次终态和已结算的 UE Actor 标签回执。打开「对话历史」即可
+查看已保存的文本。继续操作需核验编辑器连接并建立新的助手会话。历史使用独立 SQLite 库，
+不会保存模型凭据、连接票据或原始工具消息。应用重启时，未结束的轮次会标记为已中断。
+
 ### Project registrations / 项目登记
 
 Choose an engine and enter a name and absolute project directory in the preview.

@@ -28,6 +28,7 @@ const { t } = useI18n()
 const endpoint = ref('')
 const model = ref('')
 const credential = ref('')
+const saveHistory = ref(false)
 const message = ref('')
 const agentId = ref<string | null>(null)
 const runId = ref<number | null>(null)
@@ -83,7 +84,13 @@ const knownErrors = new Set([
   'agent_step_limit',
   'agent_context_limit',
   'agent_output_buffer_limit',
-  'credential_unavailable'
+  'credential_unavailable',
+  'chat_history_unavailable',
+  'chat_history_invalid_input',
+  'chat_history_active_turn',
+  'chat_history_recovery_required',
+  'chat_history_locked',
+  'chat_history_invalid'
 ])
 function displayError(cause: unknown): void {
   const code = typeof cause === 'string' && knownErrors.has(cause) ? cause : 'generic'
@@ -102,6 +109,7 @@ function reset(): void {
   cancelled.value = false
   unavailable.value = false
   credential.value = ''
+  saveHistory.value = false
   message.value = ''
   messages.value = []
   error.value = null
@@ -176,7 +184,7 @@ async function send(): Promise<void> {
   error.value = null
   cancelled.value = false
   try {
-    const result = await startAgent(props.engine, id, text)
+    const result = await startAgent(props.engine, id, text, saveHistory.value)
     if (current !== epoch || agentId.value !== id || result.agentId !== id) {
       void cancelAgent(props.engine, result.agentId, result.runId).catch(() => {})
       return
@@ -186,7 +194,10 @@ async function send(): Promise<void> {
     phase.value = 'running'
     void poll(id, result.runId, current)
   } catch (cause) {
-    if (current === epoch) displayError(cause)
+    if (current === epoch) {
+      message.value = text
+      displayError(cause)
+    }
   } finally {
     if (current === epoch) busy.value = false
   }
@@ -259,6 +270,15 @@ async function cancel(): Promise<void> {
         autocomplete="off"
         :disabled="busy || Boolean(agentId)"
       />
+      <label class="agent-history-choice">
+        <input
+          v-model="saveHistory"
+          type="checkbox"
+          name="agent-save-history"
+          :disabled="busy || Boolean(agentId)"
+        />
+        {{ t('tauriPreview.editorAgent.saveHistory') }}
+      </label>
       <div class="agent-actions">
         <AppButton data-agent-create html-type="submit" variant="primary" :disabled="!canCreate">{{
           t('tauriPreview.editorAgent.create')
@@ -331,6 +351,12 @@ async function cancel(): Promise<void> {
 .agent-form :deep(.ant-input:focus-visible) {
   outline: 2px solid var(--color-border-focus);
   outline-offset: 2px;
+}
+.agent-history-choice {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-text-secondary);
 }
 .agent-actions {
   display: flex;

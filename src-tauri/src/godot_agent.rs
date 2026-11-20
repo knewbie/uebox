@@ -1,10 +1,11 @@
 //! Fixed-target, read-only Godot Agent preview. Nothing here discovers editors.
+use crate::chat_history::{finish_recorded_run, start_recorded_run};
 use crate::godot::{GodotSessions, SessionHandle};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
-use tauri::Runtime;
+use tauri::{Manager, Runtime};
 use uebox_agent_core::{
     AgentSession, Cancellation, Engine, Error, ModelEvent, OpenAiProvider, ProviderConfig,
     ReadOnlyTool, RunTarget, ToolDefinition, ToolFuture, ToolRegistry,
@@ -345,6 +346,7 @@ pub(crate) async fn start_godot_agent<R: Runtime>(
     window: tauri::WebviewWindow<R>,
     agent_id: String,
     text: String,
+    save_history: Option<bool>,
     sessions: tauri::State<'_, GodotSessions>,
 ) -> Result<StartedRun, String> {
     if text.trim().is_empty() || text.len() > 64 * 1024 {
@@ -391,7 +393,7 @@ pub(crate) async fn start_godot_agent<R: Runtime>(
         }
         .into());
     }
-    let (run, target_id, handle) = {
+    let (run, recording, target_id, handle) = {
         let mut state = host.state.lock().unwrap_or_else(|e| e.into_inner());
         let target_id = agent_mut(&mut state, &agent_id, &owner)?.target_id.clone();
         let handle = state
@@ -401,12 +403,19 @@ pub(crate) async fn start_godot_agent<R: Runtime>(
             .handle
             .clone();
         let agent = agent_mut(&mut state, &agent_id, &owner)?;
-        let run = agent
-            .session
-            .as_ref()
-            .ok_or("agent_unavailable")?
-            .start(text)
-            .map_err(error_code)?;
+        if agent.run.as_ref().is_some_and(|run| run.result.is_none()) {
+            return Err("agent_busy".into());
+        }
+        let session = agent.session.as_ref().ok_or("agent_unavailable")?;
+        let (run, recording) = start_recorded_run(
+            window.app_handle(),
+            session,
+            &agent_id,
+            uebox_chat_history::Engine::Godot,
+            text,
+            save_history.unwrap_or(false),
+            error_code,
+        )?;
         agent.run = Some(ActiveRun {
             id: run.id(),
             cancellation: run.cancellation(),
@@ -416,7 +425,7 @@ pub(crate) async fn start_godot_agent<R: Runtime>(
             queued_bytes: 0,
             forced_error: None,
         });
-        (run, target_id, handle)
+        (run, recording, target_id, handle)
     };
     let run_id = run.id();
     let task_host = Arc::clone(&host);
@@ -424,7 +433,7 @@ pub(crate) async fn start_godot_agent<R: Runtime>(
     tauri::async_runtime::spawn(async move {
         let callback_host = Arc::clone(&task_host);
         let callback_id = task_agent_id.clone();
-        let result = run
+        let outcome = run
             .execute(move |event| {
                 let ModelEvent::TextDelta(text) = event;
                 let mut state = callback_host
@@ -440,9 +449,8 @@ pub(crate) async fn start_godot_agent<R: Runtime>(
                     queue_text(run, text);
                 }
             })
-            .await
-            .map(|_| ())
-            .map_err(error_code);
+            .await;
+        let result = finish_recorded_run(recording, outcome, error_code).await;
         let mut state = task_host.state.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(run) = state
             .agents
