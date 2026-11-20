@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
-import { join } from 'path'
+import { join, win32 } from 'path'
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const root = mkdtempSync(join(tmpdir(), 'blender-setup-'))
@@ -181,7 +181,7 @@ describe('检查现状', () => {
 
   it('安装目录跟着传进来的环境走', async () => {
     const status = await inspectBlenderSetup(windows)
-    expect(status.installRoot.startsWith(root)).toBe(true)
+    expect(win32.dirname(status.installRoot)).toBe(win32.join(root, 'UnrealBox', 'BlenderMcp'))
   })
 })
 

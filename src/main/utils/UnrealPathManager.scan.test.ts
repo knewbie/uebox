@@ -10,7 +10,7 @@
  * 分不开的话，界面会对着装了四个引擎的用户说「没有找到已安装的虚幻引擎」，
  * Agent 会直接告诉模型这台机器没装引擎，而首页还会顺手删掉用户存的默认引擎。
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('electron', () => ({ app: { getPath: () => '/home' } }))
 vi.mock('../sqliteDataBase', () => ({ getPublicDatabase: () => null }))
@@ -73,10 +73,13 @@ function eacces(): NodeJS.ErrnoException {
 
 describe('scanEngines 的 degraded', () => {
   beforeEach(() => {
+    // These fixtures cover the Epic Launcher manifest readers used on Windows.
+    vi.stubGlobal('process', Object.create(process, { platform: { value: 'win32' } }))
     vi.clearAllMocks()
     readdir.mockReset()
     readFile.mockReset()
   })
+  afterEach(() => vi.unstubAllGlobals())
 
   it('两份记录都读到了 —— degraded=false', async () => {
     readdir.mockResolvedValue(['UE_5.5.item'])

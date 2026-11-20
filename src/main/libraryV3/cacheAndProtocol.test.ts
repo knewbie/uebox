@@ -261,13 +261,14 @@ describe('shadow copy view file', () => {
 
   it('puts shadow copies under LOCALAPPDATA only for the normal roaming profile', () => {
     const env = {
-      APPDATA: 'C:\\Users\\a\\AppData\\Roaming',
-      LOCALAPPDATA: 'C:\\Users\\a\\AppData\\Local'
+      APPDATA: join(tmpdir(), 'profile-fixture', 'Roaming'),
+      LOCALAPPDATA: join(tmpdir(), 'profile-fixture', 'Local')
     }
-    expect(shadowRootFor('C:\\Users\\a\\AppData\\Roaming\\unreal-box', env)).toBe(
-      join('C:\\Users\\a\\AppData\\Local', 'unreal-box', 'lore-shadow')
+    const developmentProfile = join(tmpdir(), 'dev-profile-fixture')
+    expect(shadowRootFor(join(env.APPDATA, 'unreal-box'), env)).toBe(
+      join(env.LOCALAPPDATA, 'unreal-box', 'lore-shadow')
     )
-    expect(shadowRootFor('H:\\dev\\profile', env)).toBe(join('H:\\dev\\profile', 'lore-shadow'))
+    expect(shadowRootFor(developmentProfile, env)).toBe(join(developmentProfile, 'lore-shadow'))
   })
 })
 

@@ -5,7 +5,7 @@ import path from 'path'
  * PathManager 在这里只当「当前活跃保管库是谁」的替身 ——
  * 测的是不传 vaultPath 时会不会错拼到活跃库上。
  */
-const CURRENT_VAULT = path.join('C:', 'vaults', 'aigc')
+const CURRENT_VAULT = path.resolve('fixtures', 'vaults', 'aigc')
 
 vi.mock('../../../../utils/PathManager', () => ({
   PathManager: {
@@ -18,7 +18,7 @@ vi.mock('../../../../utils/PathManager', () => ({
 
 import { formatAssets } from './AssetFormatter'
 
-const DEFAULT_VAULT = path.join('D:', 'vaults', 'default')
+const DEFAULT_VAULT = path.resolve('fixtures', 'vaults', 'default')
 
 /** 备份类型的库导入完就是这个样子：库里存相对路径，来源留在 originPath */
 const backupRow = {
@@ -26,7 +26,7 @@ const backupRow = {
   assetKey: 'key-1',
   folderKey: 'folder-1',
   filePath: path.join('20260906_120000', 'Game', 'KawaiiAnimations', 'AS_Idle.uasset'),
-  originPath: path.join('I:', 'tmp', 'KawaiiAnimations', 'AS_Idle.uasset')
+  originPath: path.resolve('fixtures', 'origins', 'KawaiiAnimations', 'AS_Idle.uasset')
 }
 
 describe('formatAssets 的 real_path', () => {

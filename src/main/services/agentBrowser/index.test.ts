@@ -1336,12 +1336,13 @@ describe('浏览器手感', () => {
     ...mods
   })
 
-  it('网页里按 Ctrl+T 开新标签，并让面板聚焦地址栏', async () => {
+  it('网页里的平台新标签快捷键打开新标签，并让面板聚焦地址栏', async () => {
     const instance = new AgentBrowserService('keys')
     await openPage(instance)
     const event = { preventDefault: vi.fn() }
 
-    emit(lastContents(), 'before-input-event', event, key('t', { control: true }))
+    const modifier = process.platform === 'darwin' ? { meta: true } : { control: true }
+    emit(lastContents(), 'before-input-event', event, key('t', modifier))
 
     expect(event.preventDefault).toHaveBeenCalled()
     expect(instance.groupState().tabs).toHaveLength(2)

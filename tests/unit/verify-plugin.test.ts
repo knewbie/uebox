@@ -196,15 +196,23 @@ describe('verify:plugin command', () => {
   ])('checks the selected package when it is $kind', ({ kind, status }) => {
     const root = setupFixture()
     const fingerprint = sourceFingerprint(join(root, 'plugin/UnrealAgentLink'))
+    const isMac = process.platform === 'darwin'
+    const archive = isMac ? 'UnrealAgentLink57-Mac.zip' : 'UnrealAgentLink57.zip'
     if (kind !== 'missing') {
-      writeStampZip(join(root, 'resources/plugins'), 'UnrealAgentLink57.zip', {
-        fingerprint: kind === 'fresh' ? fingerprint : 'old',
-        engine: '5.7'
-      })
+      writeStampZip(
+        join(root, 'resources/plugins'),
+        archive,
+        {
+          fingerprint: kind === 'fresh' ? fingerprint : 'old',
+          engine: '5.7',
+          platform: isMac ? 'Mac' : 'Win64'
+        },
+        isMac ? ['Binaries/Mac/UnrealEditor-UnrealAgentLink.dylib'] : []
+      )
     }
     const result = runCommand(root)
     expect(result.status, result.output).toBe(status)
-    expect(result.output).toContain('UnrealAgentLink57.zip')
+    expect(result.output).toContain(archive)
     expect(result.output).toContain(
       `Plugin package check: ${status === 0 ? 'passed' : 'failed'} (UE 5.7)`
     )

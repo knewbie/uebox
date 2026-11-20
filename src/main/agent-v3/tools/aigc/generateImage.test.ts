@@ -11,6 +11,8 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 const generateImages = vi.fn()
 const readSettings = vi.fn()
@@ -183,7 +185,10 @@ describe('参考图', () => {
 
   it('路径写错就报错，不静默丢掉参考图', async () => {
     await expect(
-      tool.execute('c1', { prompt: '出成品图', reference_images: ['H:\\不存在\\a.png'] })
+      tool.execute('c1', {
+        prompt: '出成品图',
+        reference_images: [join(tmpdir(), 'uebox-missing-image-fixture', 'a.png')]
+      })
     ).rejects.toThrow(/读不到/)
 
     expect(generateImages).not.toHaveBeenCalled()

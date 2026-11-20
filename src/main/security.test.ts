@@ -1,4 +1,6 @@
 import type { BrowserWindow } from 'electron'
+import { join, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { openExternalMock } = vi.hoisted(() => ({
@@ -60,19 +62,14 @@ describe('Electron renderer security boundaries', () => {
   })
 
   it('trusts only the packaged renderer file in production', () => {
-    const rendererFile = 'H:\\UnrealAgent\\unreal-agent-app\\out\\renderer\\index.html'
+    const directory = resolve('fixtures', 'Packaged Preview', 'renderer')
+    const rendererFile = join(directory, 'index.html')
+    const trustedUrl = pathToFileURL(rendererFile)
+    trustedUrl.hash = '/assistant'
 
+    expect(isTrustedRendererUrl(trustedUrl.href, rendererFile)).toBe(true)
     expect(
-      isTrustedRendererUrl(
-        'file:///H:/UnrealAgent/unreal-agent-app/out/renderer/index.html#/assistant',
-        rendererFile
-      )
-    ).toBe(true)
-    expect(
-      isTrustedRendererUrl(
-        'file:///H:/UnrealAgent/unreal-agent-app/out/renderer/other.html',
-        rendererFile
-      )
+      isTrustedRendererUrl(pathToFileURL(join(directory, 'other.html')).href, rendererFile)
     ).toBe(false)
   })
 

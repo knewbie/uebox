@@ -8,13 +8,18 @@
  */
 
 import { mkdtemp, writeFile } from 'fs/promises'
-import { tmpdir } from 'os'
+import { homedir, tmpdir } from 'os'
 import { join } from 'path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const toBuffer = vi.fn(async () => Buffer.from('shrunk'))
 const jpeg = vi.fn(() => ({ toBuffer }))
 const resize = vi.fn(() => ({ jpeg }))
+
+vi.mock('os', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('os')>()
+  return { ...actual, homedir: () => join(actual.tmpdir(), 'uebox-reference-fixture') }
+})
 
 vi.mock('../../../utils/sharpLoader', () => ({
   getSharp: async () => () => ({ resize })
@@ -108,7 +113,8 @@ describe('挡下来的输入', () => {
   })
 
   it('凭据目录 —— 生图参数也是一条能把私钥读出去的路', async () => {
-    await expect(loadReferenceImage('C:\\Users\\me\\.ssh\\id_rsa')).rejects.toThrow(/凭据/)
+    const protectedFixture = join(homedir(), '.ssh', 'id_rsa')
+    await expect(loadReferenceImage(protectedFixture)).rejects.toThrow(/凭据/)
   })
 
   it('文件不存在时说清去哪拿一张', async () => {

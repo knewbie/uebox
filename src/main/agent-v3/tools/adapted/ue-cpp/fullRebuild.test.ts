@@ -291,7 +291,15 @@ describe('cpp_full_rebuild', () => {
       expect(callRequest).not.toHaveBeenCalled()
       expect(findRunningProjectByPath).not.toHaveBeenCalled()
       expect(openPath).not.toHaveBeenCalled()
-      expect(JSON.stringify(spawnMock.mock.calls[0])).toContain('MyGame Win64 Development')
+      const [executable, args] = spawnMock.mock.calls[0]
+      if (process.platform === 'win32') {
+        expect(executable).toBe('cmd.exe')
+        expect(args[3]).toContain('MyGame Win64 Development')
+      } else {
+        const platform = process.platform === 'darwin' ? 'Mac' : 'Linux'
+        expect(String(executable)).toMatch(/\/Build\.sh$/)
+        expect(args.slice(0, 3)).toEqual(['MyGame', platform, 'Development'])
+      }
       expect(r.details).toMatchObject({ closedEditor: false, built: true, target: 'MyGame' })
     })
 

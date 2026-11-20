@@ -205,7 +205,7 @@ describe('参数与前置检查', () => {
 
     it('方舟不收的格式（.avi）连对象存储都不碰，直接说要转格式', async () => {
       await expect(
-        run({ prompt: '猫', reference_videos: ['D:/renders/shot.avi'] })
+        run({ prompt: '猫', reference_videos: [join(tmpdir(), 'shot.avi')] })
       ).rejects.toThrow(/mp4 \/ mov/)
       expect(isObjectStorageReady).not.toHaveBeenCalled()
       expect(generateVideo).not.toHaveBeenCalled()
@@ -287,7 +287,7 @@ describe('参数与前置检查', () => {
       run({
         prompt: '猫',
         reference_videos: ['https://cdn/cam.mp4'],
-        reference_audios: ['C:/a.flac']
+        reference_audios: [join(tmpdir(), 'a.flac')]
       })
     ).rejects.toThrow(/wav \/ mp3/)
     expect(generateVideo).not.toHaveBeenCalled()
