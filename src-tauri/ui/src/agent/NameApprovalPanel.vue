@@ -19,6 +19,7 @@ interface Receipt {
   approvalId: string
   status: 'applied' | 'mismatch' | 'not_executed' | 'unknown'
   actualName: string | null
+  historyError?: string
 }
 
 const props = defineProps<{ agentId: string; engine: 'unity' | 'godot' }>()
@@ -113,6 +114,11 @@ onUnmounted(() => {
             name: receipt.actualName ?? ''
           })
         }}
+        <AppAlert
+          v-if="receipt.historyError"
+          type="error"
+          :message="t(`${messages}.historyError`)"
+        />
       </li>
     </ul>
   </div>

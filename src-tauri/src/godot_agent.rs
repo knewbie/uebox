@@ -57,7 +57,7 @@ impl Agent {
     fn run_is_active(&self) -> bool {
         self.session
             .as_ref()
-            .is_some_and(|session| session.snapshot().run_id.is_some())
+            .is_some_and(|session| session.has_active_run())
     }
 
     fn retain_after_retirement(&mut self) -> bool {
@@ -503,7 +503,12 @@ pub(crate) async fn start_godot_agent<R: Runtime>(
     let run_id = run.id();
     let task_host = Arc::clone(&host);
     let task_agent_id = agent_id.clone();
+    let receipt_log = recording.as_ref().map(|turn| {
+        host.name_writes
+            .record_run(agent_id.clone(), run_id, turn.clone())
+    });
     tauri::async_runtime::spawn(async move {
+        let _receipt_log = receipt_log;
         let callback_host = Arc::clone(&task_host);
         let callback_id = task_agent_id.clone();
         let outcome = run
@@ -524,14 +529,36 @@ pub(crate) async fn start_godot_agent<R: Runtime>(
             })
             .await;
         let result = finish_recorded_run(recording, outcome, error_code).await;
-        let mut state = task_host.state.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(run) = state
-            .agents
-            .get_mut(&task_agent_id)
-            .and_then(|agent| agent.run.as_mut())
-            .filter(|run| run.id == run_id)
         {
-            run.result = Some(result);
+            let mut state = task_host
+                .state
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            if let Some(run) = state
+                .agents
+                .get_mut(&task_agent_id)
+                .and_then(|agent| agent.run.as_mut())
+                .filter(|run| run.id == run_id)
+            {
+                run.result = Some(result);
+            }
+        }
+        loop {
+            {
+                let mut state = task_host
+                    .state
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner());
+                if !state.agents.get(&task_agent_id).is_some_and(|agent| {
+                    agent.run.as_ref().is_some_and(|run| run.id == run_id) && agent.run_is_active()
+                }) {
+                    state
+                        .agents
+                        .retain(|_, agent| agent.retain_after_retirement());
+                    break;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
         }
     });
     let monitor_host = Arc::clone(&host);

@@ -215,6 +215,9 @@ func _process(_delta: float) -> void:
 
     let app = tauri::test::mock_builder()
         .manage(sessions.clone())
+        .manage(crate::chat_history::ChatHistoryHost::for_test(
+            fixture.root.clone(),
+        ))
         .invoke_handler(tauri::generate_handler![
             super::launch_godot,
             super::connect_godot,
@@ -222,6 +225,7 @@ func _process(_delta: float) -> void:
             super::query_godot_scene,
             super::status_godot_session,
             super::release_godot_session,
+            crate::chat_history::get_agent_chat,
             crate::godot_agent::create_godot_agent,
             crate::godot_agent::start_godot_agent,
             crate::godot_agent::poll_godot_agent,
@@ -462,7 +466,7 @@ func _process(_delta: float) -> void:
     let rename_run = invoke(
         &window,
         "start_godot_agent",
-        json!({"agentId":renamed_agent_id,"text":"Rename Player"}),
+        json!({"agentId":renamed_agent_id,"text":"Rename Player","saveHistory":true}),
     )
     .unwrap();
     let poll_rename = json!({"agentId":renamed_agent_id,"runId":rename_run["runId"]});
@@ -518,6 +522,22 @@ func _process(_delta: float) -> void:
         invoke(&window, "query_godot_scene", body.clone()).unwrap()["nodes"][1]["name"],
         "ApprovedPlayer"
     );
+    let history = invoke(
+        &window,
+        "get_agent_chat",
+        json!({"chatId":renamed_agent_id}),
+    )
+    .unwrap();
+    assert_eq!(history["engine"], "godot");
+    assert_eq!(history["turns"][0]["status"], "completed");
+    assert_eq!(history["turns"][0]["actorLabelReceipts"], json!([]));
+    assert_eq!(
+        history["turns"][0]["nodeNameReceipts"],
+        json!([{
+            "approvalId": approval["approvalId"], "status": "applied", "actualName": "ApprovedPlayer"
+        }])
+    );
+    assert!(invoke(&window, "get_agent_chat", json!({"chatId":agent_id})).is_err());
     let requests = rename_requests.join().unwrap();
     assert!(requests[0].contains("godot_rename_scene_node"));
     assert!(requests[1].contains("ApprovedPlayer"));

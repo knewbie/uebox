@@ -8,9 +8,11 @@ use std::{
 use rusqlite::{params, Connection, ErrorCode, OptionalExtension, Row, TransactionBehavior};
 
 mod actor_label;
+mod node_name;
 mod storage;
 
 pub use actor_label::{ActorLabelReceipt, ActorLabelStatus};
+pub use node_name::NodeNameReceipt;
 
 const MAX_USER_TEXT_BYTES: usize = 1024 * 1024;
 const MAX_ASSISTANT_TEXT_BYTES: usize = 4 * 1024 * 1024;
@@ -171,6 +173,7 @@ pub struct Turn {
     pub started_at_ms: i64,
     pub finished_at_ms: Option<i64>,
     pub actor_label_receipts: Vec<ActorLabelReceipt>,
+    pub node_name_receipts: Vec<NodeNameReceipt>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -283,6 +286,7 @@ impl ChatHistory {
                 .collect::<Result<Vec<_>, HistoryError>>()?
         };
         actor_label::load_receipts(&transaction, id, summary.engine, &mut turns)?;
+        node_name::load_receipts(&transaction, id, summary.engine, &mut turns)?;
         transaction.commit()?;
         Ok(Some(Chat { summary, turns }))
     }
@@ -541,5 +545,6 @@ fn decode_turn(row: TurnRow) -> Result<Turn, HistoryError> {
         started_at_ms,
         finished_at_ms,
         actor_label_receipts: Vec::new(),
+        node_name_receipts: Vec::new(),
     })
 }

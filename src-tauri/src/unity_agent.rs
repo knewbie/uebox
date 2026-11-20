@@ -576,7 +576,12 @@ pub(crate) async fn start_unity_agent<R: Runtime>(
     drop(probe_gate);
     let run_id = run.id();
     let worker_id = agent_id.clone();
+    let receipt_log = recording.as_ref().map(|turn| {
+        host.name_writes
+            .record_run(agent_id.clone(), run_id, turn.clone())
+    });
     tauri::async_runtime::spawn(async move {
+        let _receipt_log = receipt_log;
         let outcome = run
             .execute(|ModelEvent::TextDelta(text)| {
                 if let Some(run) = lock(&host.state)

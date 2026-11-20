@@ -11,6 +11,9 @@ use uebox_agent_core::{
     ToolApprovalRequest, ToolApprover, ToolRegistry,
 };
 
+use crate::chat_history::RecordedTurn;
+use uebox_chat_history::ActorLabelStatus;
+
 const RECEIPT_LIMIT: usize = 128;
 
 struct Pending<P> {
@@ -175,6 +178,7 @@ pub(crate) struct NameWrites<T> {
     pending: ApprovalQueue<Proposal<T>>,
     writes: Arc<WriteGate>,
     receipts: Mutex<VecDeque<(String, Receipt)>>,
+    recordings: Recordings,
 }
 
 #[derive(Clone, Serialize)]
@@ -195,6 +199,8 @@ pub(crate) struct Receipt {
     run_id: u64,
     status: &'static str,
     actual_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    history_error: Option<&'static str>,
 }
 
 impl<T> Default for NameWrites<T> {
@@ -203,6 +209,7 @@ impl<T> Default for NameWrites<T> {
             pending: ApprovalQueue::default(),
             writes: Default::default(),
             receipts: Default::default(),
+            recordings: Default::default(),
         }
     }
 }
@@ -264,27 +271,75 @@ where
         }
     }
 
+    pub(crate) fn record_run(
+        &self,
+        agent_id: String,
+        run_id: u64,
+        turn: RecordedTurn,
+    ) -> NameRecording {
+        let key = (agent_id, run_id);
+        self.recordings
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .insert(key.clone(), turn);
+        NameRecording {
+            recordings: Arc::clone(&self.recordings),
+            key,
+        }
+    }
+
     fn record(&self, owner: String, agent_id: String, settlement: MutationSettlement) {
-        let receipt = Receipt {
+        let run_id = settlement.invocation.run_id;
+        let recording = self
+            .recordings
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .get(&(agent_id.clone(), run_id))
+            .cloned();
+        let status = match settlement.receipt.status {
+            MutationStatus::Applied => ActorLabelStatus::Applied,
+            MutationStatus::Mismatch => ActorLabelStatus::Mismatch,
+            MutationStatus::NotExecuted => ActorLabelStatus::NotExecuted,
+            MutationStatus::Unknown => ActorLabelStatus::Unknown,
+        };
+        let mut receipt = Receipt {
             approval_id: settlement.invocation.approval_id.to_string(),
             agent_id,
-            run_id: settlement.invocation.run_id,
-            status: match settlement.receipt.status {
-                MutationStatus::Applied => "applied",
-                MutationStatus::Mismatch => "mismatch",
-                MutationStatus::NotExecuted => "not_executed",
-                MutationStatus::Unknown => "unknown",
-            },
+            run_id,
+            status: status.as_str(),
             actual_name: settlement.receipt.data["actualName"]
                 .as_str()
                 .map(str::to_owned),
+            history_error: None,
         };
+        if let Some(recording) = recording {
+            receipt.history_error = recording
+                .record_node_name(&receipt.approval_id, status, receipt.actual_name.as_deref())
+                .err();
+        }
         if let Ok(mut receipts) = self.receipts.lock() {
             if receipts.len() >= RECEIPT_LIMIT {
                 receipts.pop_front();
             }
             receipts.push_back((owner, receipt));
         }
+    }
+}
+
+type RunKey = (String, u64);
+type Recordings = Arc<Mutex<HashMap<RunKey, RecordedTurn>>>;
+
+pub(crate) struct NameRecording {
+    recordings: Recordings,
+    key: RunKey,
+}
+
+impl Drop for NameRecording {
+    fn drop(&mut self) {
+        self.recordings
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .remove(&self.key);
     }
 }
 

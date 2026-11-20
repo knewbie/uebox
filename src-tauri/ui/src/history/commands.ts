@@ -20,6 +20,9 @@ const actorReceiptSchema = z.object({
   status: z.enum(['applied', 'mismatch', 'not_executed', 'unknown']),
   actualLabel: z.string().nullable()
 })
+const nameReceiptSchema = actorReceiptSchema.omit({ actualLabel: true }).extend({
+  actualName: z.string().nullable()
+})
 const turnSchema = z.object({
   // Keep IDs as decimal strings, including values outside JavaScript's exact integer range.
   id: z.string().regex(/^\d+$/),
@@ -28,7 +31,8 @@ const turnSchema = z.object({
   status: z.enum(['pending', 'completed', 'failed', 'cancelled', 'interrupted']),
   createdAt: timestamp,
   finishedAt: timestamp.nullable(),
-  actorLabelReceipts: z.array(actorReceiptSchema).optional()
+  actorLabelReceipts: z.array(actorReceiptSchema).optional(),
+  nodeNameReceipts: z.array(nameReceiptSchema).optional()
 })
 const pageSchema = z.object({
   chats: z.array(summarySchema),

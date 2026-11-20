@@ -3,7 +3,14 @@ import { onBeforeUnmount, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppAlert from '@renderer/components/AppAlert.vue'
 import AppButton from '@renderer/components/AppButton.vue'
-import { getAgentChat, listAgentChats, type AgentChat, type AgentChatSummary } from './commands'
+import {
+  getAgentChat,
+  listAgentChats,
+  type AgentChat,
+  type AgentChatSummary,
+  type AgentChatTurn,
+  type ActorLabelReceipt
+} from './commands'
 
 const { t, locale } = useI18n()
 const opened = ref(false)
@@ -19,6 +26,21 @@ const detailError = ref(false)
 let listRequest = 0
 let detailRequest = 0
 let disposed = false
+
+function editorReceipts(
+  turn: AgentChatTurn
+): { approvalId: string; status: ActorLabelReceipt['status']; name: string | null }[] {
+  return [
+    ...(turn.actorLabelReceipts ?? []).map(({ actualLabel, ...receipt }) => ({
+      ...receipt,
+      name: actualLabel
+    })),
+    ...(turn.nodeNameReceipts ?? []).map(({ actualName, ...receipt }) => ({
+      ...receipt,
+      name: actualName
+    }))
+  ]
+}
 
 function resetDetail(): void {
   detailRequest += 1
@@ -248,12 +270,23 @@ onBeforeUnmount(() => {
                 <p data-history-assistant class="history-text">
                   {{ turn.assistantText ?? t('tauriPreview.history.noAssistantText') }}
                 </p>
-                <section v-if="turn.actorLabelReceipts?.length" data-history-receipts>
-                  <h5>{{ t('tauriPreview.history.actorReceipts.title') }}</h5>
+                <section
+                  v-if="turn.actorLabelReceipts?.length || turn.nodeNameReceipts?.length"
+                  data-history-receipts
+                >
+                  <h5>
+                    {{
+                      t(
+                        chat.engine === 'unreal'
+                          ? 'tauriPreview.history.actorReceipts.title'
+                          : 'tauriPreview.history.nameReceipts.title'
+                      )
+                    }}
+                  </h5>
                   <ul class="history-receipt-rows">
                     <li
-                      v-for="(receipt, receiptIndex) in turn.actorLabelReceipts"
-                      :key="receiptIndex"
+                      v-for="receipt in editorReceipts(turn)"
+                      :key="receipt.approvalId"
                       data-history-receipt
                     >
                       <p>
@@ -267,11 +300,23 @@ onBeforeUnmount(() => {
                           </dd>
                         </div>
                         <div>
-                          <dt>{{ t('tauriPreview.history.actorReceipts.actualLabel') }}</dt>
+                          <dt>
+                            {{
+                              t(
+                                chat.engine === 'unreal'
+                                  ? 'tauriPreview.history.actorReceipts.actualLabel'
+                                  : 'tauriPreview.history.nameReceipts.actual'
+                              )
+                            }}
+                          </dt>
                           <dd data-history-actual-label class="history-text">
                             {{
-                              receipt.actualLabel ??
-                              t('tauriPreview.history.actorReceipts.noActualLabel')
+                              receipt.name ??
+                              t(
+                                chat.engine === 'unreal'
+                                  ? 'tauriPreview.history.actorReceipts.noActualLabel'
+                                  : 'tauriPreview.history.nameReceipts.none'
+                              )
                             }}
                           </dd>
                         </div>

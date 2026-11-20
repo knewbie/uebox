@@ -68,8 +68,13 @@ fn main() {
             .iter()
             .all(|(key, value)| env::var_os(key).as_deref() == Some(value.as_os_str()));
         fs::write(
-            project.join(".fixture-isolation"),
+            project.join(".fixture-isolation.tmp"),
             if valid { "ok" } else { "bad" },
+        )
+        .unwrap();
+        fs::rename(
+            project.join(".fixture-isolation.tmp"),
+            project.join(".fixture-isolation"),
         )
         .unwrap();
     }

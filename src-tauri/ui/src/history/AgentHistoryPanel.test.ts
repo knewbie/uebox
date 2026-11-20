@@ -311,6 +311,33 @@ describe('optional Actor label receipts', () => {
   )
 })
 
+it.each(['unity', 'godot'] as const)('renders a saved %s name as plain text', async (engine) => {
+  ipc
+    .mockResolvedValueOnce({ chats: [{ ...summary, engine }], nextOffset: null })
+    .mockResolvedValueOnce({
+      ...detail,
+      engine,
+      turns: [
+        {
+          ...detail.turns[0],
+          nodeNameReceipts: [
+            {
+              approvalId: 'name-change',
+              status: 'applied',
+              actualName: '<img src=x> Player'
+            }
+          ]
+        }
+      ]
+    })
+  const wrapper = await openPanel()
+  await selectChat(wrapper)
+  const block = wrapper.get('[data-history-receipts]')
+  expect(block.get('h5').text()).toBe('Name change receipts')
+  expect(block.get('[data-history-actual-label]').text()).toBe('<img src=x> Player')
+  expect(block.find('img').exists()).toBe(false)
+})
+
 describe('asynchronous response ordering', () => {
   it.each(['resolve', 'reject'] as const)(
     'ignores an older detail %s after another selection',

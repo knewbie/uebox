@@ -22,7 +22,7 @@ impl ActorLabelStatus {
         }
     }
 
-    fn from_db(value: &str) -> Result<Self, HistoryError> {
+    pub(crate) fn from_db(value: &str) -> Result<Self, HistoryError> {
         match value {
             "applied" => Ok(Self::Applied),
             "mismatch" => Ok(Self::Mismatch),
@@ -32,7 +32,7 @@ impl ActorLabelStatus {
         }
     }
 
-    fn accepts_label(self, actual_label: Option<&str>) -> bool {
+    pub(crate) fn accepts_label(self, actual_label: Option<&str>) -> bool {
         match (self, actual_label) {
             (Self::Applied | Self::Mismatch, Some(label)) => {
                 label.len() <= MAX_LABEL_BYTES && !label.chars().any(char::is_control)

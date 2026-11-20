@@ -144,6 +144,11 @@ export default {
       assistant: 'Assistant',
       noAssistantText: 'No assistant response saved.',
       emptyTurns: 'No turns saved in this chat.',
+      nameReceipts: {
+        title: 'Name change receipts',
+        actual: 'Read-back name',
+        none: 'No name read back'
+      },
       actorReceipts: {
         title: 'Actor label receipts',
         approvalId: 'Approval ID',
@@ -519,6 +524,7 @@ export default {
     },
     godot: {
       nameWrite: {
+        historyError: 'The editor result could not be saved to chat history.',
         optIn: 'Allow the assistant to request renaming a node in the edited scene',
         title: 'Node rename approvals',
         change: 'Rename “{oldName}” to “{newName}”?',
@@ -614,6 +620,7 @@ export default {
     },
     unity: {
       nameWrite: {
+        historyError: 'The editor result could not be saved to chat history.',
         optIn: 'Allow the assistant to request renaming the selected GameObject',
         connect: 'Connect assistant with rename requests',
         title: 'GameObject rename approvals',

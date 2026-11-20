@@ -6,7 +6,8 @@ use std::{
 use serde::Serialize;
 use tauri::{AppHandle, Manager, Runtime};
 use uebox_chat_history::{
-    ActorLabelReceipt, Chat, ChatHistory, ChatSummary, Engine, HistoryError, Turn, TurnState,
+    ActorLabelReceipt, Chat, ChatHistory, ChatSummary, Engine, HistoryError, NodeNameReceipt, Turn,
+    TurnState,
 };
 
 use crate::profile_storage::{
@@ -47,6 +48,14 @@ fn lock_chat_history(
 }
 
 impl ChatHistoryHost {
+    #[cfg(all(test, feature = "godot-real-editor-test", unix))]
+    pub(crate) fn for_test(root: PathBuf) -> Self {
+        Self {
+            test_data_dir: Arc::new(std::sync::OnceLock::from(root)),
+            ..Self::default()
+        }
+    }
+
     fn with_database<T>(
         &self,
         root: PathBuf,
@@ -127,6 +136,8 @@ mod agent_runs {
         host: ChatHistoryHost,
         root: PathBuf,
         id: TurnId,
+        #[cfg(any(feature = "unity", feature = "godot"))]
+        engine: Engine,
     }
 
     pub(crate) fn start_recorded_run<R: Runtime>(
@@ -149,7 +160,13 @@ mod agent_runs {
                     .ok_or(HistoryError::Missing)?
                     .begin_chat_turn(agent_id, engine, &text)
             })?;
-            Some(RecordedTurn { host, root, id })
+            Some(RecordedTurn {
+                host,
+                root,
+                id,
+                #[cfg(any(feature = "unity", feature = "godot"))]
+                engine,
+            })
         } else {
             None
         };
@@ -186,6 +203,27 @@ mod agent_runs {
                     database
                         .ok_or(HistoryError::Missing)?
                         .record_actor_label_receipt(self.id, approval_id, status, actual_label)
+                })
+        }
+
+        #[cfg(any(feature = "unity", feature = "godot"))]
+        pub(crate) fn record_node_name(
+            &self,
+            approval_id: &str,
+            status: uebox_chat_history::ActorLabelStatus,
+            actual_name: Option<&str>,
+        ) -> Result<(), &'static str> {
+            self.host
+                .with_database(self.root.clone(), false, |database| {
+                    database
+                        .ok_or(HistoryError::Missing)?
+                        .record_node_name_receipt(
+                            self.id,
+                            self.engine,
+                            approval_id,
+                            status,
+                            actual_name,
+                        )
                 })
         }
 
@@ -239,7 +277,7 @@ mod agent_runs {
     }
 }
 
-#[cfg(feature = "unreal")]
+#[cfg(any(feature = "unreal", feature = "unity", feature = "godot"))]
 pub(crate) use agent_runs::RecordedTurn;
 #[cfg(any(feature = "unreal", feature = "unity", feature = "godot"))]
 pub(crate) use agent_runs::{finish_recorded_run, start_recorded_run};
@@ -281,6 +319,8 @@ pub(crate) struct HistoryTurn {
     created_at: i64,
     finished_at: Option<i64>,
     actor_label_receipts: Vec<HistoryReceipt>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    node_name_receipts: Vec<HistoryNameReceipt>,
 }
 
 #[derive(Serialize)]
@@ -297,6 +337,24 @@ impl From<ActorLabelReceipt> for HistoryReceipt {
             approval_id: receipt.approval_id,
             status: receipt.status.as_str(),
             actual_label: receipt.actual_label,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HistoryNameReceipt {
+    approval_id: String,
+    status: &'static str,
+    actual_name: Option<String>,
+}
+
+impl From<NodeNameReceipt> for HistoryNameReceipt {
+    fn from(receipt: NodeNameReceipt) -> Self {
+        Self {
+            approval_id: receipt.approval_id,
+            status: receipt.status.as_str(),
+            actual_name: receipt.actual_name,
         }
     }
 }
@@ -320,6 +378,11 @@ impl From<Turn> for HistoryTurn {
             finished_at: turn.finished_at_ms.map(|value| value / 1000),
             actor_label_receipts: turn
                 .actor_label_receipts
+                .into_iter()
+                .map(Into::into)
+                .collect(),
+            node_name_receipts: turn
+                .node_name_receipts
                 .into_iter()
                 .map(Into::into)
                 .collect(),

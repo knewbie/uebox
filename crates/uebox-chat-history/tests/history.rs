@@ -135,7 +135,7 @@ fn wrong_application_version_or_exact_schema_is_refused_without_updates() {
     let temp = tempfile::tempdir().unwrap();
     for (file, sql) in [
         ("app.sqlite", "PRAGMA application_id = 1;"),
-        ("version.sqlite", "PRAGMA user_version = 2;"),
+        ("version.sqlite", "PRAGMA user_version = 3;"),
         ("extra.sqlite", "CREATE TABLE unrelated(value TEXT);"),
         ("missing-index.sqlite", "DROP INDEX one_active_turn;"),
         (
@@ -747,4 +747,106 @@ fn actor_label_receipts_refuse_invalid_fields_and_other_engines() {
     }
     let chat = history.get_chat("ue").unwrap().unwrap();
     assert!(chat.turns[0].actor_label_receipts.is_empty());
+}
+
+#[test]
+fn upgrades_the_exact_v1_database_and_keeps_engine_specific_receipts() {
+    use uebox_chat_history::ActorLabelStatus;
+
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("history.sqlite");
+    let mut database = ChatHistory::create_new(&path).unwrap();
+    let unreal = database
+        .begin_chat_turn("original", Engine::Unreal, "Rename Actor")
+        .unwrap();
+    database
+        .finish_turn(unreal, TerminalTurn::Cancelled)
+        .unwrap();
+    database
+        .record_actor_label_receipt(
+            unreal,
+            "old-receipt",
+            ActorLabelStatus::Applied,
+            Some("Actor"),
+        )
+        .unwrap();
+    drop(database);
+    let raw = Connection::open(&path).unwrap();
+    raw.execute_batch("DROP TABLE node_name_receipts; PRAGMA user_version = 1;")
+        .unwrap();
+    drop(raw);
+
+    let mut database = ChatHistory::open_existing(&path).unwrap();
+    let original = database.get_chat("original").unwrap().unwrap();
+    assert!(original.turns[0].node_name_receipts.is_empty());
+    assert_eq!(
+        original.turns[0].actor_label_receipts[0]
+            .actual_label
+            .as_deref(),
+        Some("Actor")
+    );
+    let unity = database
+        .begin_chat_turn("unity-chat", Engine::Unity, "Rename GameObject")
+        .unwrap();
+    let godot = database
+        .begin_chat_turn("godot-chat", Engine::Godot, "Rename Node")
+        .unwrap();
+    database
+        .finish_turn(godot, TerminalTurn::Cancelled)
+        .unwrap();
+    assert_eq!(
+        database.record_node_name_receipt(
+            unity,
+            Engine::Godot,
+            "same-id",
+            ActorLabelStatus::Applied,
+            Some("Wrong")
+        ),
+        Err(HistoryError::EngineMismatch)
+    );
+    for _ in 0..2 {
+        database
+            .record_node_name_receipt(
+                godot,
+                Engine::Godot,
+                "same-id",
+                ActorLabelStatus::Applied,
+                Some("Player"),
+            )
+            .unwrap();
+    }
+    database
+        .record_node_name_receipt(
+            unity,
+            Engine::Unity,
+            "same-id",
+            ActorLabelStatus::Unknown,
+            None,
+        )
+        .unwrap();
+    assert_eq!(
+        database.record_node_name_receipt(
+            godot,
+            Engine::Godot,
+            "same-id",
+            ActorLabelStatus::Applied,
+            Some("Conflict")
+        ),
+        Err(HistoryError::ReceiptConflict)
+    );
+    drop(database);
+
+    let reopened = ChatHistory::open_existing(&path).unwrap();
+    let godot = reopened.get_chat("godot-chat").unwrap().unwrap();
+    assert_eq!(godot.turns[0].state, TurnState::Cancelled);
+    assert_eq!(godot.turns[0].node_name_receipts.len(), 1);
+    assert_eq!(
+        godot.turns[0].node_name_receipts[0].actual_name.as_deref(),
+        Some("Player")
+    );
+    let unity = reopened.get_chat("unity-chat").unwrap().unwrap();
+    assert_eq!(
+        unity.turns[0].node_name_receipts[0].status,
+        ActorLabelStatus::Unknown
+    );
 }

@@ -14,7 +14,7 @@ use crate::HistoryError;
 mod recovery;
 
 const APPLICATION_ID: u32 = 0x5542_4348; // UBCH
-const VERSION: u32 = 1;
+const VERSION: u32 = 2;
 const SIDECARS: [&str; 3] = ["-wal", "-shm", "-journal"];
 
 const CHATS: &str = "CREATE TABLE chats (
@@ -69,7 +69,24 @@ const ACTOR_LABEL_RECEIPTS: &str = "CREATE TABLE actor_label_receipts (
     PRIMARY KEY (turn_id, approval_id)
 ) STRICT, WITHOUT ROWID";
 
-const SCHEMA: [(&str, &str, &str, &str); 6] = [
+const NODE_NAME_RECEIPTS: &str = "CREATE TABLE node_name_receipts (
+    turn_id INTEGER NOT NULL REFERENCES turns(id),
+    approval_id TEXT NOT NULL CHECK (
+        length(approval_id) BETWEEN 1 AND 128 AND approval_id NOT GLOB '*[^A-Za-z0-9_-]*'
+        AND instr(approval_id, char(0)) = 0
+    ),
+    status TEXT NOT NULL CHECK (status IN ('applied', 'mismatch', 'not_executed', 'unknown')),
+    actual_name TEXT CHECK (
+        length(CAST(actual_name AS BLOB)) <= 4096 AND instr(actual_name, char(0)) = 0
+        AND actual_name NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || '-' || char(159) || ']*')
+    ),
+    CHECK ((status IN ('applied', 'mismatch') AND actual_name IS NOT NULL)
+        OR (status IN ('not_executed', 'unknown') AND actual_name IS NULL)),
+    PRIMARY KEY (turn_id, approval_id)
+) STRICT, WITHOUT ROWID";
+
+type SchemaEntry = (&'static str, &'static str, &'static str, &'static str);
+const SCHEMA_V1: [SchemaEntry; 6] = [
     ("table", "chats", "chats", CHATS),
     ("table", "turns", "turns", TURNS),
     (
@@ -82,6 +99,21 @@ const SCHEMA: [(&str, &str, &str, &str); 6] = [
     ("index", "one_active_turn", "turns", ONE_ACTIVE_TURN),
     ("index", "turns_by_chat", "turns", TURNS_BY_CHAT),
 ];
+const NODE_NAME_ENTRY: SchemaEntry = (
+    "table",
+    "node_name_receipts",
+    "node_name_receipts",
+    NODE_NAME_RECEIPTS,
+);
+
+fn schema(version: u32) -> Vec<SchemaEntry> {
+    let mut schema = SCHEMA_V1.to_vec();
+    if version == VERSION {
+        schema.push(NODE_NAME_ENTRY);
+    }
+    schema.sort_unstable_by_key(|entry| entry.1);
+    schema
+}
 
 pub(super) fn create_new(path: &Path) -> Result<Connection, HistoryError> {
     let path = database_path(path)?;
@@ -110,7 +142,8 @@ pub(super) fn create_new(path: &Path) -> Result<Connection, HistoryError> {
     let transaction = connection.transaction()?;
     transaction.pragma_update(None, "application_id", APPLICATION_ID)?;
     transaction.pragma_update(None, "user_version", VERSION)?;
-    for (_, _, _, sql) in SCHEMA {
+    // Keep table/index creation ordering so all indexed tables already exist.
+    for (_, _, _, sql) in SCHEMA_V1.into_iter().chain([NODE_NAME_ENTRY]) {
         transaction.execute_batch(sql)?;
     }
     transaction.commit()?;
@@ -134,14 +167,17 @@ pub(super) fn open_existing(path: &Path) -> Result<Connection, HistoryError> {
     let path = database_path(path)?;
     reject_sidecars(&path)?;
     database_metadata(&path)?;
-    {
+    let version = {
         let read_only = open_sqlite(&path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
-        validate_database(&read_only)?;
-    }
+        validate_database(&read_only)?
+    };
     reject_sidecars(&path)?;
-    let connection = open_sqlite(&path, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
-    validate_header(&connection)?;
+    let mut connection = open_sqlite(&path, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
+    if validate_header(&connection)? != version {
+        return Err(HistoryError::Unsupported);
+    }
     configure(&connection)?;
+    upgrade(&mut connection, version)?;
     Ok(connection)
 }
 
@@ -156,7 +192,7 @@ pub(super) fn open_existing_recovering(path: &Path) -> Result<Connection, Histor
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     {
         recovery::check_files(&path, &journal)?;
-        let connection = open_sqlite(&path, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
+        let mut connection = open_sqlite(&path, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
         // Inspect the raw file before asking SQLite for anything that opens its pager.
         validate_header(&connection)?;
         // SQLite acquires its own recovery locks and either rolls back or reports an error.
@@ -164,14 +200,28 @@ pub(super) fn open_existing_recovering(path: &Path) -> Result<Connection, Histor
             row.get::<_, i64>(0)
         })?;
         reject_sidecars(&path)?;
-        validate_database(&connection)?;
+        let version = validate_database(&connection)?;
         configure(&connection)?;
+        upgrade(&mut connection, version)?;
         Ok(connection)
     }
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {
         Err(HistoryError::RecoveryRequired)
     }
+}
+
+fn upgrade(connection: &mut Connection, version: u32) -> Result<(), HistoryError> {
+    if version == VERSION {
+        return Ok(());
+    }
+    let transaction =
+        connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    transaction.execute_batch(NODE_NAME_RECEIPTS)?;
+    transaction.pragma_update(None, "user_version", VERSION)?;
+    transaction.commit()?;
+    validate_database(connection)?;
+    Ok(())
 }
 
 fn database_metadata(path: &Path) -> Result<Metadata, HistoryError> {
@@ -294,24 +344,29 @@ fn io_error(error: io::Error) -> HistoryError {
     }
 }
 
-fn validate_header(connection: &Connection) -> Result<(), HistoryError> {
+fn validate_header(connection: &Connection) -> Result<u32, HistoryError> {
     let header = raw_header(connection)?;
     if &header[..16] != b"SQLite format 3\0" {
         return Err(HistoryError::Corrupt);
     }
+    let version = u32::from_be_bytes(
+        header[60..64]
+            .try_into()
+            .map_err(|_| HistoryError::Corrupt)?,
+    );
     // SQLite header: read/write formats, text encoding, user_version, application_id.
     if header[18..20] != [1, 1]
         || header[56..60] != 1_u32.to_be_bytes()
-        || header[60..64] != VERSION.to_be_bytes()
+        || !matches!(version, 1 | VERSION)
         || header[68..72] != APPLICATION_ID.to_be_bytes()
     {
         return Err(HistoryError::Unsupported);
     }
-    Ok(())
+    Ok(version)
 }
 
-fn validate_database(connection: &Connection) -> Result<(), HistoryError> {
-    validate_header(connection)?;
+fn validate_database(connection: &Connection) -> Result<u32, HistoryError> {
+    let expected_version = validate_header(connection)?;
     let transaction = connection.unchecked_transaction()?;
     {
         let application_id: u32 =
@@ -321,7 +376,7 @@ fn validate_database(connection: &Connection) -> Result<(), HistoryError> {
         let mode: String =
             transaction.pragma_query_value(None, "journal_mode", |row| row.get(0))?;
         if application_id != APPLICATION_ID
-            || version != VERSION
+            || version != expected_version
             || !mode.eq_ignore_ascii_case("delete")
         {
             return Err(HistoryError::Unsupported);
@@ -329,9 +384,7 @@ fn validate_database(connection: &Connection) -> Result<(), HistoryError> {
         let mut schema = transaction
             .prepare("SELECT type, name, tbl_name, sql FROM sqlite_schema ORDER BY name")?;
         let mut rows = schema.query([])?;
-        let mut expected_schema = SCHEMA;
-        expected_schema.sort_unstable_by_key(|entry| entry.1);
-        for expected in expected_schema {
+        for expected in self::schema(version) {
             let row = rows.next()?.ok_or(HistoryError::Unsupported)?;
             let actual: (String, String, String, Option<String>) =
                 (row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?);
@@ -361,7 +414,7 @@ fn validate_database(connection: &Connection) -> Result<(), HistoryError> {
         }
     }
     transaction.commit()?;
-    Ok(())
+    Ok(expected_version)
 }
 
 /// Use SQLite's own descriptor. Closing an independent POSIX file handle can

@@ -28,6 +28,11 @@ export const historyTestMessages = {
         assistant: 'Assistant',
         noAssistantText: 'No assistant response saved.',
         emptyTurns: 'No turns saved in this chat.',
+        nameReceipts: {
+          title: 'Name change receipts',
+          actual: 'Read-back name',
+          none: 'No name read back'
+        },
         actorReceipts: {
           title: 'Actor label receipts',
           approvalId: 'Approval ID',
@@ -79,6 +84,11 @@ export const historyTestMessages = {
         assistant: '助手',
         noAssistantText: '未保存助手回复。',
         emptyTurns: '此对话尚无已保存的轮次。',
+        nameReceipts: {
+          title: '重命名回执',
+          actual: '读回名称',
+          none: '未读回名称'
+        },
         actorReceipts: {
           title: 'Actor 标签回执',
           approvalId: '审批 ID',

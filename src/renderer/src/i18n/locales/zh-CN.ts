@@ -139,6 +139,11 @@ export default {
       assistant: '助手',
       noAssistantText: '未保存助手回复。',
       emptyTurns: '此对话尚无已保存的轮次。',
+      nameReceipts: {
+        title: '重命名回执',
+        actual: '读回名称',
+        none: '未读回名称'
+      },
       actorReceipts: {
         title: 'Actor 标签回执',
         approvalId: '审批 ID',
@@ -501,6 +506,7 @@ export default {
     },
     godot: {
       nameWrite: {
+        historyError: '编辑器结果未能保存到对话历史。',
         optIn: '允许助手申请重命名当前场景的节点',
         title: '节点重命名审批',
         change: '将「{oldName}」重命名为「{newName}」？',
@@ -591,6 +597,7 @@ export default {
     },
     unity: {
       nameWrite: {
+        historyError: '编辑器结果未能保存到对话历史。',
         optIn: '允许助手申请重命名选中的 GameObject',
         connect: '连接可申请重命名的助手',
         title: 'GameObject 重命名审批',
