@@ -7,6 +7,8 @@ mod desktop_files;
 mod godot;
 #[cfg(feature = "godot")]
 mod godot_agent;
+#[cfg(feature = "godot")]
+mod godot_rename_tool;
 mod host;
 mod legacy_history;
 mod mcp;
@@ -35,7 +37,7 @@ mod unreal_actor_tool;
 mod unreal_agent;
 #[cfg(feature = "unreal")]
 mod unreal_approval;
-#[cfg(feature = "unity")]
+#[cfg(any(feature = "unity", feature = "godot"))]
 mod write_approval;
 
 pub use host::{read_host_status, Capability, EngineModules, HostStatus};
@@ -59,7 +61,16 @@ pub fn configure_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> taur
         .on_menu_event(desktop::menu_event)
         .on_window_event(desktop::window_event);
     #[cfg(feature = "godot")]
-    let builder = builder.manage(godot::GodotSessions::default());
+    let builder = builder
+        .manage(godot::GodotSessions::default())
+        .on_window_event(|window, event| {
+            use tauri::Manager;
+            if matches!(event, tauri::WindowEvent::Destroyed) {
+                window
+                    .state::<godot::GodotSessions>()
+                    .destroy_window(window.label());
+            }
+        });
     #[cfg(feature = "unity")]
     let builder = builder
         .manage(unity::UnityQueries::default())
@@ -175,6 +186,10 @@ pub fn configure_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> taur
             godot_agent::cancel_godot_agent,
             #[cfg(feature = "godot")]
             godot_agent::close_godot_agent,
+            #[cfg(feature = "godot")]
+            godot_agent::list_godot_name_activity,
+            #[cfg(feature = "godot")]
+            godot_agent::answer_godot_name_approval,
             #[cfg(feature = "unity")]
             unity::inspect_unity,
             #[cfg(feature = "unity")]

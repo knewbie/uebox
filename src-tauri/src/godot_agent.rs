@@ -1,11 +1,13 @@
-//! Fixed-target, read-only Godot Agent preview. Nothing here discovers editors.
+//! Assistant bound to one explicitly managed Godot editor.
 #[cfg(any(target_os = "macos", target_os = "linux", windows))]
 #[path = "native_cli/godot_targets.rs"]
 mod native_cli_targets;
 
 use crate::chat_history::{finish_recorded_run, start_recorded_run};
 use crate::godot::{GodotSessions, SessionHandle};
+use crate::godot_rename_tool::{register_node_rename, GodotNameWrites, Proposal};
 use crate::settings::{AgentModel, AgentModelSource};
+use crate::write_approval::Receipt;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, Weak};
@@ -27,6 +29,7 @@ const MAX_QUEUED_TEXT: usize = 1024 * 1024;
 pub(crate) struct AgentHost {
     registry: Arc<Mutex<EngineRegistry>>,
     state: Mutex<HostState>,
+    name_writes: Arc<GodotNameWrites>,
 }
 #[derive(Default)]
 struct HostState {
@@ -35,6 +38,7 @@ struct HostState {
 }
 #[derive(Clone)]
 struct Target {
+    owner: String,
     token: ConnectionToken,
     selection: EditorSelection,
     handle: SessionHandle,
@@ -133,6 +137,7 @@ impl AgentHost {
     pub(crate) fn register(
         &self,
         id: &str,
+        owner: String,
         handle: SessionHandle,
         project: ProjectIdentity,
         instance: String,
@@ -158,6 +163,7 @@ impl AgentHost {
         state.targets.insert(
             id.to_owned(),
             Target {
+                owner,
                 token,
                 selection,
                 handle,
@@ -196,6 +202,29 @@ impl AgentHost {
         state
             .agents
             .retain(|_, agent| agent.retain_after_retirement());
+    }
+
+    pub(crate) fn destroy_window(&self, owner: &str) {
+        self.name_writes.revoke_owner(owner);
+        let targets = {
+            let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            for agent in state
+                .agents
+                .values_mut()
+                .filter(|agent| agent.owner == owner)
+            {
+                agent.closed = true;
+            }
+            state
+                .targets
+                .iter()
+                .filter(|(_, target)| target.owner == owner)
+                .map(|(id, _)| id.clone())
+                .collect::<Vec<_>>()
+        };
+        for id in targets {
+            self.retire(&id);
+        }
     }
 
     fn close_agent(&self, id: &str, owner: &str) -> Result<(), String> {
@@ -288,13 +317,20 @@ pub(crate) async fn create_godot_agent<R: Runtime>(
     endpoint: String,
     model: String,
     credential: Option<String>,
+    allow_node_rename: Option<bool>,
 ) -> Result<CreatedAgent, String> {
     let source = AgentModelSource::Direct {
         endpoint,
         model,
         credential,
     };
-    create_godot_with_model(window, session_id, source).await
+    create_godot_with_model(
+        window,
+        session_id,
+        source,
+        allow_node_rename.unwrap_or(false),
+    )
+    .await
 }
 
 #[tauri::command]
@@ -302,15 +338,23 @@ pub(crate) async fn create_godot_agent_from_profile<R: Runtime>(
     window: tauri::WebviewWindow<R>,
     session_id: String,
     profile_id: Option<String>,
+    allow_node_rename: Option<bool>,
 ) -> Result<CreatedAgent, String> {
     let source = AgentModelSource::Saved { profile_id };
-    create_godot_with_model(window, session_id, source).await
+    create_godot_with_model(
+        window,
+        session_id,
+        source,
+        allow_node_rename.unwrap_or(false),
+    )
+    .await
 }
 
 async fn create_godot_with_model<R: Runtime>(
     window: tauri::WebviewWindow<R>,
     session_id: String,
     source: AgentModelSource,
+    allow_node_rename: bool,
 ) -> Result<CreatedAgent, String> {
     let owner = window.label().to_owned();
     let host = Arc::clone(&window.state::<GodotSessions>().agent);
@@ -318,10 +362,10 @@ async fn create_godot_with_model<R: Runtime>(
     tauri::async_runtime::spawn_blocking(move || {
         let target = {
             let state = host.state.lock().unwrap_or_else(|e| e.into_inner());
-            state.targets.get(&session_id).cloned().ok_or("target_unavailable")?
+            state.targets.get(&session_id).filter(|target| target.owner == owner).cloned().ok_or("target_unavailable")?
         };
         let binding = match GodotToolBinding::new(Arc::clone(&host.registry), target.selection.clone(), Arc::clone(&target.handle)) {
-            Ok(binding) => binding,
+            Ok(binding) => Arc::new(binding),
             Err(_) => {
                 let terminal = match target.handle.try_lock() {
                     Ok(mut guard) => guard.as_mut().is_none_or(|session| !matches!(session.status(), Ok(SessionState::Ready))),
@@ -346,16 +390,25 @@ async fn create_godot_with_model<R: Runtime>(
                 target_id: session_id.clone(),
             })).map_err(error_code)?;
         }
-        let session = AgentSession::new_with_system_prompt(provider, registry, binding.validator(), 6,
-            "You are a read-only assistant for the selected Godot editor. Use only the supplied read-only tools. Do not claim to change the project.")
+        let agent_id = id()?;
+        let instructions = if allow_node_rename {
+            registry = register_node_rename(
+                registry, Arc::clone(&binding), Arc::clone(&host.name_writes),
+                owner.clone(), agent_id.clone(),
+            ).map_err(error_code)?;
+            "Assist with the selected Godot editor. Ask for approval using the supplied rename tool. Report the outcome based on its receipt. The tool never saves the scene."
+        } else {
+            "You are a read-only assistant for the selected Godot editor. Use only the supplied read-only tools. Do not claim to change the project."
+        };
+        let session = AgentSession::new_with_system_prompt(provider, registry, binding.validator(), 6, instructions)
             .map_err(error_code)?;
         let mut state = host.state.lock().unwrap_or_else(|e| e.into_inner());
         if !state.targets.get(&session_id).is_some_and(|current| current.token == target.token) {
             return Err("target_unavailable".into());
         }
-        if state.agents.values().any(|agent| agent.target_id == session_id) { return Err("agent_already_exists".into()); }
-        let mut agent_id = id()?;
-        while state.agents.contains_key(&agent_id) { agent_id = id()?; }
+        if state.agents.contains_key(&agent_id) || state.agents.values().any(|agent| agent.target_id == session_id) {
+            return Err("agent_already_exists".into());
+        }
         state.agents.insert(agent_id.clone(), Agent { owner, target_id: session_id, session: Some(Arc::new(session)), credential, run: None, retired: false, closed: false });
         Ok(CreatedAgent { agent_id })
     }).await.map_err(|_| "agent_worker_error".to_string())?
@@ -555,7 +608,15 @@ pub(crate) fn poll_godot_agent<R: Runtime>(
         Some(Ok(())) => "completed",
         Some(Err(_)) => "failed",
         None if run.cancelled => "cancelling",
-        _ => "running",
+        None if !sessions
+            .agent
+            .name_writes
+            .approvals(window.label(), &agent_id)
+            .is_empty() =>
+        {
+            "awaiting_approval"
+        }
+        None => "running",
     };
     let error = if retired {
         Some("target_unavailable")
@@ -619,6 +680,43 @@ pub(crate) fn close_godot_agent<R: Runtime>(
     sessions: tauri::State<'_, GodotSessions>,
 ) -> Result<(), String> {
     sessions.agent.close_agent(&agent_id, window.label())
+}
+
+#[derive(Serialize)]
+pub(crate) struct GodotNameActivity {
+    approvals: Vec<Proposal>,
+    receipts: Vec<Receipt>,
+}
+
+#[tauri::command]
+pub(crate) fn list_godot_name_activity<R: Runtime>(
+    window: tauri::WebviewWindow<R>,
+    agent_id: String,
+    sessions: tauri::State<'_, GodotSessions>,
+) -> GodotNameActivity {
+    GodotNameActivity {
+        approvals: sessions
+            .agent
+            .name_writes
+            .approvals(window.label(), &agent_id),
+        receipts: sessions
+            .agent
+            .name_writes
+            .receipts(window.label(), &agent_id),
+    }
+}
+
+#[tauri::command]
+pub(crate) fn answer_godot_name_approval<R: Runtime>(
+    window: tauri::WebviewWindow<R>,
+    approval_id: String,
+    approved: bool,
+    sessions: tauri::State<'_, GodotSessions>,
+) -> Result<(), &'static str> {
+    sessions
+        .agent
+        .name_writes
+        .answer(window.label(), &approval_id, approved)
 }
 
 #[cfg(test)]

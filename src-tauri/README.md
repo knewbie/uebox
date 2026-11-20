@@ -3,7 +3,7 @@
 This is a separate preview entry. It does not implement the Electron bridge. A limited
 Unity project and active-scene query, an Unreal project query, and Godot editor
 queries are available after explicit user actions. Each engine has a fixed-target
-read-only assistant preview.
+assistant with read-only access by default and optional approved name changes.
 Use the Electron application for existing features.
 Its identifier is separate so it does not use the Electron application's webview
 preferences. Node is used only to build/serve the frontend during development;
@@ -11,7 +11,7 @@ the application backend and commands run in the Tauri Rust process.
 
 这是独立的迁移预览入口，不实现 Electron 桥；只有用户主动操作才会执行有限的 Unity
 项目和活动场景查询、Unreal 项目只读查询以及 Godot 编辑器查询。三种引擎各有绑定固定目标
-的只读助手预览。现有功能请继续使用
+的助手，默认只读，可单独启用名称修改审批。现有功能请继续使用
 Electron 版本。预览版使用独立标识，不读取 Electron 的 WebView 偏好设置。Node 只在
 开发时构建或提供前端文件，应用后端和命令运行在 Tauri 的 Rust 进程内。
 
@@ -361,6 +361,11 @@ returned to the WebView. `connect_godot`, `query_godot_project`,
 `query_godot_scene`, `status_godot_session`, and `release_godot_session` require
 that exact ID. They do not discover, attach, poll, or reconnect automatically.
 Initial connection attempts are explicit; an established disconnected session is terminal.
+The window that launches the editor owns its connection. The Godot assistant
+can request renaming an owned non-root node in the active scene when the user
+opts in. Approval displays the scene and node path. The project addon rechecks
+the prepared identity, updates the editor undo history, and reads back the
+name. Save the scene in Godot when ready.
 
 Godot's v1 protocol does not authenticate the server, sends its token in plaintext
 over loopback, and passes it in the editor's environment. Local processes or
@@ -377,6 +382,9 @@ session crate 的固定参数启动所选交互式编辑器。项目必须预先
 返回令牌或端口。`connect_godot`、`query_godot_project`、`query_godot_scene`、
 `status_godot_session` 和 `release_godot_session` 均要求该 ID；不自动发现、附着、
 轮询或重连。初始连接由用户主动触发，已建立后断开的会话不可自动恢复。
+启动窗口管理该编辑器连接。用户主动启用后，Godot 助手可申请重命名当前场景内归属该
+场景的非根节点。审批显示场景与节点路径，插件复核预览时的目标身份、记录可撤销操作并
+读回名称。请在 Godot 中确认后保存场景。
 
 Godot v1 协议不验证服务器身份，令牌在本机回环上明文传输，并进入编辑器环境。本机
 进程或项目代码可能读取令牌或伪造响应。启动项目可能运行脚本和插件并写入项目或编辑器

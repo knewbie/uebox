@@ -479,6 +479,22 @@ export default {
       }
     },
     godot: {
+      nameWrite: {
+        optIn: '允许助手申请重命名当前场景的节点',
+        title: '节点重命名审批',
+        change: '将「{oldName}」重命名为「{newName}」？',
+        identity: '{scenePath} · {nodePath}。请在 Godot 中确认后保存场景。',
+        unsavedScene: '未保存的场景 · {nodePath}。请在 Godot 中确认后保存场景。',
+        approve: '批准重命名',
+        decline: '拒绝',
+        expired: '此审批已无法使用。',
+        status: {
+          applied: '编辑器已确认重命名为「{name}」。',
+          mismatch: '编辑器读回的名称为「{name}」。',
+          not_executed: '未执行重命名。',
+          unknown: '无法确认最终名称，请先在 Godot 中核对。'
+        }
+      },
       title: 'Godot 编辑器预览',
       intro:
         '选择可信的本机 Godot 可执行文件和项目。项目插件必须预先启用；此处不会安装或启用插件。',

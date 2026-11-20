@@ -39,6 +39,73 @@ it('requires explicit model configuration and a connected fixed Godot target', a
   wrapper.unmount()
 })
 
+it('offers rename only after opt-in and renders the exact scene, node, and approved name', async () => {
+  const ipc = vi.mocked(invoke)
+  let approved = false
+  ipc.mockImplementation(async (command) => {
+    if (command === 'create_godot_agent') return { agentId: 'agent-write' }
+    if (command === 'answer_godot_name_approval') approved = true
+    if (command === 'list_godot_name_activity') {
+      return approved
+        ? {
+            approvals: [],
+            receipts: [{ approvalId: 'request', status: 'applied', actualName: 'PlayerTwo' }]
+          }
+        : {
+            approvals: [
+              {
+                approvalId: 'request',
+                scenePath: 'res://main.tscn',
+                nodePath: 'Actors/Player',
+                oldName: 'Player',
+                newName: 'PlayerTwo'
+              }
+            ],
+            receipts: []
+          }
+    }
+  })
+  const wrapper = mount(AgentPanel, {
+    props: { sessionId: 'fixed-target', ready: true },
+    global: { plugins: [createAppI18n('en-US')] }
+  })
+  try {
+    await wrapper.get('[data-godot-opt-into-rename]').setValue(true)
+    await wrapper
+      .get('input[name="agent-endpoint"]')
+      .setValue('http://127.0.0.1:5555/v1/chat/completions')
+    await wrapper.get('input[name="agent-model"]').setValue('fixture')
+    await wrapper.get('form.agent-form').trigger('submit')
+    await flushPromises()
+    expect(ipc.mock.calls[0]).toEqual([
+      'create_godot_agent',
+      {
+        sessionId: 'fixed-target',
+        endpoint: 'http://127.0.0.1:5555/v1/chat/completions',
+        model: 'fixture',
+        credential: null,
+        allowNodeRename: true
+      }
+    ])
+    expect(wrapper.get('[data-godot-opt-into-rename]').attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).toContain('res://main.tscn · Actors/Player')
+    expect(ipc.mock.calls.some(([name]) => name === 'answer_godot_name_approval')).toBe(false)
+    await wrapper.get('[data-godot-approve]').trigger('click')
+    await flushPromises()
+    expect(ipc).toHaveBeenCalledWith('answer_godot_name_approval', {
+      approvalId: 'request',
+      approved: true
+    })
+    expect(wrapper.text()).toContain('Renamed to “PlayerTwo” in the editor.')
+    await wrapper.setProps({ sessionId: 'new-target' })
+    expect((wrapper.get('[data-godot-opt-into-rename]').element as HTMLInputElement).checked).toBe(
+      false
+    )
+  } finally {
+    wrapper.unmount()
+  }
+})
+
 it('starts a saved model using its profile ID without an endpoint or credential in Vue', async () => {
   vi.mocked(invoke)
     .mockResolvedValueOnce({

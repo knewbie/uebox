@@ -1,12 +1,18 @@
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use tauri::Runtime;
 use uebox_godot_session::{
     GodotSession, LaunchOptions, ProjectInfo, SceneTree, SessionError, SessionState,
 };
 
 pub(crate) type SessionHandle = Arc<Mutex<Option<GodotSession>>>;
-type SessionMap = Arc<Mutex<HashMap<String, SessionHandle>>>;
+type SessionMap = Arc<Mutex<HashMap<String, OwnedSession>>>;
+
+struct OwnedSession {
+    owner: String,
+    handle: SessionHandle,
+}
 
 #[derive(Clone, Default)]
 pub(crate) struct GodotSessions {
@@ -15,6 +21,27 @@ pub(crate) struct GodotSessions {
     // The real-editor test uses an isolated home and headless mode. Neither is a UI argument.
     #[cfg(test)]
     test_home: Option<std::path::PathBuf>,
+}
+
+impl GodotSessions {
+    pub(crate) fn destroy_window(&self, owner: &str) {
+        let removed = {
+            let mut sessions = self
+                .sessions
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            let ids: Vec<_> = sessions
+                .iter()
+                .filter(|(_, entry)| entry.owner == owner)
+                .map(|(id, _)| id.clone())
+                .collect();
+            ids.into_iter()
+                .filter_map(|id| sessions.remove(&id))
+                .collect::<Vec<_>>()
+        };
+        self.agent.destroy_window(owner);
+        tauri::async_runtime::spawn_blocking(move || drop(removed));
+    }
 }
 
 #[derive(Serialize)]
@@ -114,24 +141,26 @@ fn new_session_id() -> Result<String, String> {
     Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
-fn lookup(sessions: &SessionMap, id: &str) -> Result<SessionHandle, String> {
+fn lookup(sessions: &SessionMap, id: &str, owner: &str) -> Result<SessionHandle, String> {
     sessions
         .lock()
         .unwrap_or_else(|error| error.into_inner())
         .get(id)
-        .cloned()
+        .filter(|entry| entry.owner == owner)
+        .map(|entry| Arc::clone(&entry.handle))
         .ok_or_else(|| "Unknown Godot session".to_string())
 }
 
 async fn query<T: Send + 'static>(
     sessions: tauri::State<'_, GodotSessions>,
     id: String,
+    owner: String,
     operation: impl FnOnce(&mut GodotSession) -> Result<T, SessionError> + Send + 'static,
 ) -> Result<T, String> {
     let agent = Arc::clone(&sessions.agent);
     let sessions = Arc::clone(&sessions.sessions);
     tauri::async_runtime::spawn_blocking(move || {
-        let handle = lookup(&sessions, &id)?;
+        let handle = lookup(&sessions, &id, &owner)?;
         let mut guard = handle.lock().unwrap_or_else(|error| error.into_inner());
         let session = guard
             .as_mut()
@@ -152,12 +181,14 @@ async fn query<T: Send + 'static>(
 }
 
 #[tauri::command]
-pub(crate) async fn launch_godot(
+pub(crate) async fn launch_godot<R: Runtime>(
+    window: tauri::WebviewWindow<R>,
     executable: String,
     project: String,
     sessions: tauri::State<'_, GodotSessions>,
 ) -> Result<LaunchedSession, String> {
     let sessions_map = Arc::clone(&sessions.sessions);
+    let owner = window.label().to_owned();
     #[cfg(test)]
     let test_home = sessions.test_home.clone();
     tauri::async_runtime::spawn_blocking(move || {
@@ -172,20 +203,22 @@ pub(crate) async fn launch_godot(
         while map.contains_key(&id) {
             id = new_session_id().map_err(|_| "Godot editor started, but session registration failed; the editor was left running".to_string())?;
         }
-        map.insert(id.clone(), Arc::new(Mutex::new(Some(session))));
+        map.insert(id.clone(), OwnedSession { owner, handle: Arc::new(Mutex::new(Some(session))) });
         Ok(LaunchedSession { session_id: id, state: "starting" })
     }).await.map_err(|error| format!("Godot launch worker failed; the editor may have started and was not closed: {error}"))?
 }
 
 #[tauri::command]
-pub(crate) async fn connect_godot(
+pub(crate) async fn connect_godot<R: Runtime>(
+    window: tauri::WebviewWindow<R>,
     session_id: String,
     sessions: tauri::State<'_, GodotSessions>,
 ) -> Result<ProjectSnapshot, String> {
     let map = Arc::clone(&sessions.sessions);
     let agent = Arc::clone(&sessions.agent);
     let id = session_id.clone();
-    let (snapshot, project, instance) = query(sessions, session_id, |session| {
+    let owner = window.label().to_owned();
+    let (snapshot, project, instance) = query(sessions, session_id, owner.clone(), |session| {
         let snapshot = session.connect_once()?.into();
         Ok((
             snapshot,
@@ -198,7 +231,7 @@ pub(crate) async fn connect_godot(
         let project =
             uebox_engine_core::ProjectIdentity::new(uebox_engine_core::EngineKind::Godot, project)
                 .map_err(|_| "target_unavailable".to_string())?;
-        let handle = lookup(&map, &id)?;
+        let handle = lookup(&map, &id, &owner)?;
         {
             let mut guard = handle.lock().unwrap_or_else(|error| error.into_inner());
             if !guard
@@ -211,11 +244,11 @@ pub(crate) async fn connect_godot(
         let guard = map.lock().unwrap_or_else(|error| error.into_inner());
         if !guard
             .get(&id)
-            .is_some_and(|current| Arc::ptr_eq(current, &handle))
+            .is_some_and(|current| Arc::ptr_eq(&current.handle, &handle))
         {
             return Err("Unknown Godot session".to_string());
         }
-        agent.register(&id, handle, project, instance)?;
+        agent.register(&id, owner, handle, project, instance)?;
         Ok(snapshot)
     })
     .await
@@ -223,49 +256,62 @@ pub(crate) async fn connect_godot(
 }
 
 #[tauri::command]
-pub(crate) async fn query_godot_project(
+pub(crate) async fn query_godot_project<R: Runtime>(
+    window: tauri::WebviewWindow<R>,
     session_id: String,
     sessions: tauri::State<'_, GodotSessions>,
 ) -> Result<ProjectSnapshot, String> {
-    query(sessions, session_id, |session| {
+    query(sessions, session_id, window.label().to_owned(), |session| {
         session.project_info().map(Into::into)
     })
     .await
 }
 
 #[tauri::command]
-pub(crate) async fn query_godot_scene(
+pub(crate) async fn query_godot_scene<R: Runtime>(
+    window: tauri::WebviewWindow<R>,
     session_id: String,
     sessions: tauri::State<'_, GodotSessions>,
 ) -> Result<SceneSnapshot, String> {
-    query(sessions, session_id, |session| {
+    query(sessions, session_id, window.label().to_owned(), |session| {
         session.scene_tree().map(Into::into)
     })
     .await
 }
 
 #[tauri::command]
-pub(crate) async fn status_godot_session(
+pub(crate) async fn status_godot_session<R: Runtime>(
+    window: tauri::WebviewWindow<R>,
     session_id: String,
     sessions: tauri::State<'_, GodotSessions>,
 ) -> Result<StatusSnapshot, String> {
-    query(sessions, session_id, |session| {
+    query(sessions, session_id, window.label().to_owned(), |session| {
         session.status().map(Into::into)
     })
     .await
 }
 
 #[tauri::command]
-pub(crate) async fn release_godot_session(
+pub(crate) async fn release_godot_session<R: Runtime>(
+    window: tauri::WebviewWindow<R>,
     session_id: String,
     sessions: tauri::State<'_, GodotSessions>,
 ) -> Result<(), String> {
-    let handle = sessions
-        .sessions
-        .lock()
-        .unwrap_or_else(|error| error.into_inner())
-        .remove(&session_id)
-        .ok_or_else(|| "Unknown Godot session".to_string())?;
+    let handle = {
+        let mut map = sessions
+            .sessions
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if !map
+            .get(&session_id)
+            .is_some_and(|entry| entry.owner == window.label())
+        {
+            return Err("Unknown Godot session".into());
+        }
+        map.remove(&session_id)
+            .expect("entry checked under lock")
+            .handle
+    };
     sessions.agent.retire(&session_id);
     tauri::async_runtime::spawn_blocking(move || {
         let session = handle

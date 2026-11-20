@@ -13,7 +13,9 @@ use std::{
     time::{Duration, Instant},
 };
 use uebox_engine_godot::{Credentials, Error as BridgeError, GodotClient, Target};
-pub use uebox_engine_godot::{ProjectInfo, SceneNode, SceneTree};
+pub use uebox_engine_godot::{
+    NodeRenameOutcome, PreparedNodeRename, ProjectInfo, SceneNode, SceneTree,
+};
 
 const MAX_QUERY_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_STARTUP_TIMEOUT: Duration = Duration::from_secs(300);
@@ -168,6 +170,20 @@ impl CheckedSessionResult for SceneTree {
                     || session.contains_private_bridge_values(name)
                     || session.contains_private_bridge_values(class)
             })
+    }
+}
+
+impl CheckedSessionResult for PreparedNodeRename {
+    fn contains_private_values(&self, session: &GodotSession) -> bool {
+        [
+            Some(self.node_path()),
+            Some(self.old_name()),
+            Some(self.new_name()),
+            self.scene_path(),
+        ]
+        .into_iter()
+        .flatten()
+        .any(|value| session.contains_private_bridge_values(value))
     }
 }
 
@@ -354,6 +370,40 @@ impl GodotSession {
         self.ensure_ready()?;
         let result = self.client.as_ref().expect("ready client").scene_tree();
         self.finish_query(result, false)
+    }
+
+    /// Bind a read-only preview to this managed editor's exact session.
+    pub fn prepare_node_rename(
+        &mut self,
+        path: &str,
+        name: &str,
+    ) -> Result<PreparedNodeRename, SessionError> {
+        self.ensure_ready()?;
+        let result = self
+            .client
+            .as_ref()
+            .expect("ready client")
+            .prepare_node_rename(path, name);
+        self.finish_query(result, false)
+    }
+
+    /// Hand off only an already approved, corresponding editor ticket.
+    pub fn apply_node_rename(&mut self, prepared: PreparedNodeRename) -> NodeRenameOutcome {
+        if self.ensure_ready().is_err() {
+            return NodeRenameOutcome::NotExecuted {
+                reason: "bridge_unavailable",
+            };
+        }
+        let result = self
+            .client
+            .as_ref()
+            .expect("ready client")
+            .apply_node_rename(prepared);
+        if result == NodeRenameOutcome::Unknown {
+            self.state = SessionState::Disconnected;
+            self.client = None;
+        }
+        result
     }
 
     fn ensure_ready(&mut self) -> Result<(), SessionError> {

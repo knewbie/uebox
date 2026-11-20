@@ -97,7 +97,7 @@ impl Drop for Fixture {
             .lock()
             .unwrap()
             .drain()
-            .map(|(_, h)| h)
+            .map(|(_, entry)| entry.handle)
             .collect();
         for handle in handles {
             if let Some(session) = handle.lock().unwrap().take() {
@@ -226,7 +226,9 @@ func _process(_delta: float) -> void:
             crate::godot_agent::start_godot_agent,
             crate::godot_agent::poll_godot_agent,
             crate::godot_agent::cancel_godot_agent,
-            crate::godot_agent::close_godot_agent
+            crate::godot_agent::close_godot_agent,
+            crate::godot_agent::list_godot_name_activity,
+            crate::godot_agent::answer_godot_name_approval
         ])
         .build(tauri::test::mock_context(tauri::test::noop_assets()))
         .unwrap();
@@ -244,7 +246,7 @@ func _process(_delta: float) -> void:
     assert_eq!(launched.as_object().unwrap().len(), 2);
     assert_eq!(launched["state"], "starting");
     let id = launched["sessionId"].as_str().unwrap().to_owned();
-    let handle = lookup(&sessions.sessions, &id).unwrap();
+    let handle = lookup(&sessions.sessions, &id, window.label()).unwrap();
     assert_ne!(id, handle.lock().unwrap().as_ref().unwrap().instance_id());
     drop(handle);
     let second = invoke(
@@ -400,12 +402,136 @@ func _process(_delta: float) -> void:
     assert!(requests[1].1.contains("Player"));
     assert!(!requests[1].1.contains("Tauri fixture second"));
     assert!(!requests[1].1.contains(fixture.project.to_str().unwrap()));
-    let handle = lookup(&sessions.sessions, &id).unwrap();
+    let handle = lookup(&sessions.sessions, &id, window.label()).unwrap();
     let guard = handle.lock().unwrap();
     assert!(requests
         .iter()
         .all(|(_, body)| !guard.as_ref().unwrap().contains_private_bridge_values(body)));
     drop(guard);
+
+    assert!(!requests[0].1.contains("godot_rename_scene_node"));
+    invoke(&window, "close_godot_agent", json!({"agentId":agent_id})).unwrap();
+    let other = tauri::WebviewWindowBuilder::new(&app, "other", Default::default())
+        .build()
+        .unwrap();
+    assert!(invoke(&other, "query_godot_scene", body.clone()).is_err());
+
+    let rename_model = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    rename_model.set_nonblocking(true).unwrap();
+    let rename_endpoint = format!(
+        "http://{}/v1/chat/completions",
+        rename_model.local_addr().unwrap()
+    );
+    let config = json!({
+        "sessionId":id,"endpoint":rename_endpoint,"model":"fixture-rename","allowNodeRename":true
+    });
+    assert!(invoke(&other, "create_godot_agent", config.clone()).is_err());
+    let renamed_agent = invoke(&window, "create_godot_agent", config).unwrap();
+    let renamed_agent_id = renamed_agent["agentId"].as_str().unwrap();
+    let rename_requests = thread::spawn(move || {
+        let mut requests = Vec::new();
+        for step in 0..2 {
+            let deadline = Instant::now() + Duration::from_secs(15);
+            let mut stream = loop {
+                match rename_model.accept() {
+                    Ok((stream, _)) => break stream,
+                    Err(error)
+                        if error.kind() == std::io::ErrorKind::WouldBlock
+                            && Instant::now() < deadline =>
+                    {
+                        thread::sleep(Duration::from_millis(10));
+                    }
+                    _ => panic!("rename model request did not arrive"),
+                }
+            };
+            requests.push(read_model_request(&mut stream).1);
+            let event = if step == 0 {
+                json!({"choices":[{"index":0,"delta":{"tool_calls":[{
+                    "index":0,"id":"rename-call","type":"function","function":{
+                        "name":"godot_rename_scene_node",
+                        "arguments":json!({"node_path":"Player","name":"ApprovedPlayer"}).to_string()
+                    }
+                }]},"finish_reason":"tool_calls"}]})
+            } else {
+                json!({"choices":[{"index":0,"delta":{"content":"Rename confirmed"},"finish_reason":"stop"}]})
+            };
+            respond_model(&mut stream, event);
+        }
+        requests
+    });
+    let rename_run = invoke(
+        &window,
+        "start_godot_agent",
+        json!({"agentId":renamed_agent_id,"text":"Rename Player"}),
+    )
+    .unwrap();
+    let poll_rename = json!({"agentId":renamed_agent_id,"runId":rename_run["runId"]});
+    let activity_input = json!({"agentId":renamed_agent_id});
+    let deadline = Instant::now() + Duration::from_secs(12);
+    let approval = loop {
+        let status = invoke(&window, "poll_godot_agent", poll_rename.clone()).unwrap();
+        assert_ne!(status["phase"], "failed", "{status}");
+        if status["phase"] == "awaiting_approval" {
+            let activity =
+                invoke(&window, "list_godot_name_activity", activity_input.clone()).unwrap();
+            if let Some(proposal) = activity["approvals"]
+                .as_array()
+                .and_then(|items| items.first())
+            {
+                break proposal.clone();
+            }
+        }
+        assert!(Instant::now() < deadline, "Godot approval not offered");
+        thread::sleep(Duration::from_millis(20));
+    };
+    assert_eq!(approval["oldName"], "Player");
+    assert_eq!(approval["newName"], "ApprovedPlayer");
+    assert_eq!(approval["nodePath"], "Player");
+    assert_eq!(approval["scenePath"], "res://main.tscn");
+    assert_eq!(
+        invoke(&other, "list_godot_name_activity", activity_input.clone()).unwrap()["approvals"],
+        json!([])
+    );
+    let answer = json!({"approvalId": approval["approvalId"], "approved":true});
+    assert!(invoke(&other, "answer_godot_name_approval", answer.clone()).is_err());
+    assert_eq!(
+        invoke(&window, "query_godot_scene", body.clone()).unwrap()["nodes"][1]["name"],
+        "Player"
+    );
+    invoke(&window, "answer_godot_name_approval", answer.clone()).unwrap();
+    assert!(invoke(&window, "answer_godot_name_approval", answer).is_err());
+    let deadline = Instant::now() + Duration::from_secs(12);
+    loop {
+        let status = invoke(&window, "poll_godot_agent", poll_rename.clone()).unwrap();
+        assert_ne!(status["phase"], "failed", "{status}");
+        if status["phase"] == "completed" {
+            break;
+        }
+        assert!(Instant::now() < deadline, "Godot rename run did not finish");
+        thread::sleep(Duration::from_millis(20));
+    }
+    let receipt =
+        invoke(&window, "list_godot_name_activity", activity_input).unwrap()["receipts"][0].clone();
+    assert_eq!(receipt["status"], "applied");
+    assert_eq!(receipt["actualName"], "ApprovedPlayer");
+    assert_eq!(
+        invoke(&window, "query_godot_scene", body.clone()).unwrap()["nodes"][1]["name"],
+        "ApprovedPlayer"
+    );
+    let requests = rename_requests.join().unwrap();
+    assert!(requests[0].contains("godot_rename_scene_node"));
+    assert!(requests[1].contains("ApprovedPlayer"));
+    assert!(!requests[1].contains(fixture.project.to_str().unwrap()));
+    let handle = lookup(&sessions.sessions, &id, window.label()).unwrap();
+    let guard = handle.lock().unwrap();
+    assert!(requests
+        .iter()
+        .all(|body| !guard.as_ref().unwrap().contains_private_bridge_values(body)));
+    drop(guard);
+    assert_eq!(
+        fs::read_to_string(fixture.project.join("main.tscn")).unwrap(),
+        scene_contents
+    );
 
     let status = invoke(&window, "status_godot_session", body.clone()).unwrap();
     assert_eq!(status.as_object().unwrap().len(), 2);
@@ -414,7 +540,7 @@ func _process(_delta: float) -> void:
     assert!(invoke(
         &window,
         "start_godot_agent",
-        json!({"agentId":agent_id,"text":"must fail"})
+        json!({"agentId":renamed_agent_id,"text":"must fail"})
     )
     .is_err());
     assert!(invoke(&window, "query_godot_project", body)

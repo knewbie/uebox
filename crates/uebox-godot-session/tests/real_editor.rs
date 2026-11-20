@@ -9,7 +9,9 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use uebox_godot_session::{EditorMode, GodotSession, LaunchOptions, SessionError};
+use uebox_godot_session::{
+    EditorMode, GodotSession, LaunchOptions, NodeRenameOutcome, SessionError,
+};
 
 static NEXT: AtomicU64 = AtomicU64::new(1);
 struct Fixture(PathBuf);
@@ -134,6 +136,29 @@ func _open_scene() -> void:
         vec![(".", "World"), ("Player", "Player")]
     );
     assert!(!tree.truncated);
+    assert!(editor
+        .session()
+        .prepare_node_rename(".", "Forbidden")
+        .is_err());
+    let rename = editor
+        .session()
+        .prepare_node_rename("Player", "FixtureRename")
+        .unwrap();
+    assert_eq!(rename.node_path(), "Player");
+    assert_eq!(rename.old_name(), "Player");
+    assert_eq!(rename.scene_path(), Some("res://main.tscn"));
+    let before = editor.session().scene_tree().unwrap();
+    assert!(before.nodes.iter().any(|node| node.path == "Player"));
+    assert_eq!(
+        editor.session().apply_node_rename(rename),
+        NodeRenameOutcome::Applied {
+            actual_name: "FixtureRename".to_owned()
+        }
+    );
+    let after = editor.session().scene_tree().unwrap();
+    assert!(after.nodes.iter().any(|node| node.path == "FixtureRename"));
+    assert!(!after.nodes.iter().any(|node| node.path == "Player"));
+
     assert!(
         project.join(".godot").is_dir(),
         "Godot creates its editor cache in the selected project"

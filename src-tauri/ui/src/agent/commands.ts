@@ -2,7 +2,7 @@ import { invoke } from '@tauri-apps/api/core'
 
 export type AgentEngine = 'godot' | 'unity' | 'unreal'
 export type AgentTarget =
-  | { sessionId: string; allowGameObjectRename?: true }
+  | { sessionId: string; allowGameObjectRename?: true; allowNodeRename?: true }
   | { connectionId: string; projectRoot: string; allowActorLabelChanges?: true }
 export type AgentPhase =
   | 'running'

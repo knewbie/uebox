@@ -1,10 +1,17 @@
 //! Approval and mutation admission shared by engine-specific write tools.
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
+use serde::{de::DeserializeOwned, Serialize};
 use tokio::sync::oneshot;
+use uebox_agent_core::{
+    ApprovalDecision, Error, MutationSettlement, MutationStatus, ToolApprovalFuture,
+    ToolApprovalRequest, ToolApprover, ToolRegistry,
+};
+
+const RECEIPT_LIMIT: usize = 128;
 
 struct Pending<P> {
     generation: Arc<()>,
@@ -161,5 +168,165 @@ impl Drop for WritePermit {
                 projects.unresolved.insert(self.project.clone());
             }
         }
+    }
+}
+
+pub(crate) struct NameWrites<T> {
+    pending: ApprovalQueue<Proposal<T>>,
+    writes: Arc<WriteGate>,
+    receipts: Mutex<VecDeque<(String, Receipt)>>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Proposal<T> {
+    approval_id: String,
+    agent_id: String,
+    run_id: u64,
+    #[serde(flatten)]
+    change: T,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Receipt {
+    approval_id: String,
+    agent_id: String,
+    run_id: u64,
+    status: &'static str,
+    actual_name: Option<String>,
+}
+
+impl<T> Default for NameWrites<T> {
+    fn default() -> Self {
+        Self {
+            pending: ApprovalQueue::default(),
+            writes: Default::default(),
+            receipts: Default::default(),
+        }
+    }
+}
+
+impl<T> NameWrites<T>
+where
+    T: Clone + DeserializeOwned + Send + Sync + 'static,
+{
+    pub(crate) fn install(
+        self: &Arc<Self>,
+        registry: ToolRegistry,
+        owner: String,
+        agent_id: String,
+        timeout: Duration,
+    ) -> Result<ToolRegistry, Error> {
+        let state = Arc::clone(self);
+        let approver = Arc::new(NameApprover {
+            state: Arc::clone(self),
+            owner: owner.clone(),
+            agent_id: agent_id.clone(),
+        });
+        registry.with_mutation_approval(
+            approver,
+            timeout,
+            Arc::new(move |outcome| state.record(owner.clone(), agent_id.clone(), outcome)),
+        )
+    }
+
+    pub(crate) fn write_gate(&self) -> Arc<WriteGate> {
+        Arc::clone(&self.writes)
+    }
+
+    pub(crate) fn approvals(&self, owner: &str, agent_id: &str) -> Vec<Proposal<T>> {
+        self.pending.approvals(owner, agent_id)
+    }
+
+    pub(crate) fn answer(&self, owner: &str, id: &str, approved: bool) -> Result<(), &'static str> {
+        self.pending.answer(owner, id, approved)
+    }
+
+    pub(crate) fn receipts(&self, owner: &str, agent_id: &str) -> Vec<Receipt> {
+        self.receipts.lock().map_or_else(
+            |_| Vec::new(),
+            |receipts| {
+                receipts
+                    .iter()
+                    .rev()
+                    .filter(|(window, receipt)| window == owner && receipt.agent_id == agent_id)
+                    .map(|(_, receipt)| receipt.clone())
+                    .collect()
+            },
+        )
+    }
+
+    pub(crate) fn revoke_owner(&self, owner: &str) {
+        self.pending.revoke_owner(owner);
+        if let Ok(mut receipts) = self.receipts.lock() {
+            receipts.retain(|(window, _)| window != owner);
+        }
+    }
+
+    fn record(&self, owner: String, agent_id: String, settlement: MutationSettlement) {
+        let receipt = Receipt {
+            approval_id: settlement.invocation.approval_id.to_string(),
+            agent_id,
+            run_id: settlement.invocation.run_id,
+            status: match settlement.receipt.status {
+                MutationStatus::Applied => "applied",
+                MutationStatus::Mismatch => "mismatch",
+                MutationStatus::NotExecuted => "not_executed",
+                MutationStatus::Unknown => "unknown",
+            },
+            actual_name: settlement.receipt.data["actualName"]
+                .as_str()
+                .map(str::to_owned),
+        };
+        if let Ok(mut receipts) = self.receipts.lock() {
+            if receipts.len() >= RECEIPT_LIMIT {
+                receipts.pop_front();
+            }
+            receipts.push_back((owner, receipt));
+        }
+    }
+}
+
+struct NameApprover<T> {
+    state: Arc<NameWrites<T>>,
+    owner: String,
+    agent_id: String,
+}
+
+impl<T> ToolApprover for NameApprover<T>
+where
+    T: Clone + DeserializeOwned + Send + Sync + 'static,
+{
+    fn approve(&self, request: ToolApprovalRequest) -> ToolApprovalFuture {
+        let state = Arc::clone(&self.state);
+        let owner = self.owner.clone();
+        let agent_id = self.agent_id.clone();
+        Box::pin(async move {
+            let Ok(change) = serde_json::from_value::<T>(request.preview) else {
+                return ApprovalDecision::Deny;
+            };
+            let proposal = Proposal {
+                approval_id: request.invocation.approval_id.to_string(),
+                agent_id: agent_id.clone(),
+                run_id: request.invocation.run_id,
+                change,
+            };
+            if state
+                .pending
+                .ask(
+                    proposal.approval_id.clone(),
+                    owner,
+                    agent_id,
+                    proposal,
+                    request.deadline,
+                )
+                .await
+            {
+                ApprovalDecision::Approve
+            } else {
+                ApprovalDecision::Deny
+            }
+        })
     }
 }

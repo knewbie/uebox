@@ -497,6 +497,22 @@ export default {
       }
     },
     godot: {
+      nameWrite: {
+        optIn: 'Allow the assistant to request renaming a node in the edited scene',
+        title: 'Node rename approvals',
+        change: 'Rename “{oldName}” to “{newName}”?',
+        identity: '{scenePath} · {nodePath}. Save the scene in Godot when ready.',
+        unsavedScene: 'Unsaved scene · {nodePath}. Save the scene in Godot when ready.',
+        approve: 'Approve rename',
+        decline: 'Decline',
+        expired: 'This approval is no longer available.',
+        status: {
+          applied: 'Renamed to “{name}” in the editor.',
+          mismatch: 'The editor read back “{name}”.',
+          not_executed: 'The rename was not performed.',
+          unknown: 'The final name could not be confirmed. Inspect Godot before continuing.'
+        }
+      },
       title: 'Godot editor preview',
       intro:
         'Select a trusted local Godot executable and project. The project plugin must already be enabled; it is not installed or enabled here.',

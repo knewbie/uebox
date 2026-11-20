@@ -1,110 +1,29 @@
-use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use uebox_agent_core::{
-    ApprovalDecision, Engine, Error, MutationPrepareFuture, MutationReceipt, MutationSettlement,
-    MutationStatus, MutationTool, PreparedMutation, RunTarget, ToolApprovalFuture,
-    ToolApprovalRequest, ToolApprover, ToolDefinition, ToolError, ToolRegistry,
+    Engine, Error, MutationPrepareFuture, MutationReceipt, MutationStatus, MutationTool,
+    PreparedMutation, RunTarget, ToolDefinition, ToolError, ToolRegistry,
 };
 use uebox_agent_unity_tools::UnityTools;
 use uebox_engine_unity::GameObjectNameOutcome;
 
-use crate::write_approval::{ApprovalQueue, WriteGate};
+use crate::write_approval::{NameWrites, Proposal as SharedProposal, WriteGate};
+
+pub(crate) type UnityNameWrites = NameWrites<Details>;
+pub(crate) type Proposal = SharedProposal<Details>;
 
 const APPROVAL_TIMEOUT: Duration = Duration::from_secs(20);
-const RECEIPT_LIMIT: usize = 128;
-
-#[derive(Default)]
-pub(crate) struct UnityNameWrites {
-    pending: ApprovalQueue<Proposal>,
-    writes: Arc<WriteGate>,
-    receipts: Mutex<VecDeque<(String, Receipt)>>,
-}
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct Details {
+pub(crate) struct Details {
     scene_handle: i32,
     game_object_instance_id: i32,
     old_name: String,
     new_name: String,
-}
-
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct Proposal {
-    approval_id: String,
-    agent_id: String,
-    run_id: u64,
-    #[serde(flatten)]
-    change: Details,
-}
-
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct Receipt {
-    approval_id: String,
-    agent_id: String,
-    run_id: u64,
-    status: &'static str,
-    actual_name: Option<String>,
-}
-
-impl UnityNameWrites {
-    pub(crate) fn approvals(&self, owner: &str, agent_id: &str) -> Vec<Proposal> {
-        self.pending.approvals(owner, agent_id)
-    }
-
-    pub(crate) fn answer(&self, owner: &str, id: &str, approved: bool) -> Result<(), &'static str> {
-        self.pending.answer(owner, id, approved)
-    }
-
-    pub(crate) fn receipts(&self, owner: &str, agent_id: &str) -> Vec<Receipt> {
-        self.receipts.lock().map_or_else(
-            |_| Vec::new(),
-            |receipts| {
-                receipts
-                    .iter()
-                    .rev()
-                    .filter(|(window, receipt)| window == owner && receipt.agent_id == agent_id)
-                    .map(|(_, receipt)| receipt.clone())
-                    .collect()
-            },
-        )
-    }
-
-    pub(crate) fn revoke_owner(&self, owner: &str) {
-        self.pending.revoke_owner(owner);
-        if let Ok(mut receipts) = self.receipts.lock() {
-            receipts.retain(|(window, _)| window != owner);
-        }
-    }
-
-    fn record(&self, owner: String, agent_id: String, settlement: MutationSettlement) {
-        let receipt = Receipt {
-            approval_id: settlement.invocation.approval_id.to_string(),
-            agent_id,
-            run_id: settlement.invocation.run_id,
-            status: match settlement.receipt.status {
-                MutationStatus::Applied => "applied",
-                MutationStatus::Mismatch => "mismatch",
-                MutationStatus::NotExecuted => "not_executed",
-                MutationStatus::Unknown => "unknown",
-            },
-            actual_name: settlement.receipt.data["actualName"]
-                .as_str()
-                .map(str::to_owned),
-        };
-        if let Ok(mut receipts) = self.receipts.lock() {
-            if receipts.len() >= RECEIPT_LIMIT {
-                receipts.pop_front();
-            }
-            receipts.push_back((owner, receipt));
-        }
-    }
 }
 
 pub(crate) fn register_selected_name(
@@ -114,17 +33,8 @@ pub(crate) fn register_selected_name(
     owner: String,
     agent_id: String,
 ) -> Result<ToolRegistry, Error> {
-    let approvals = Arc::new(NameApprover {
-        state: Arc::clone(&state),
-        owner: owner.clone(),
-        agent_id: agent_id.clone(),
-    });
-    let writes = Arc::clone(&state.writes);
-    let mut registry = registry.with_mutation_approval(
-        approvals,
-        APPROVAL_TIMEOUT,
-        Arc::new(move |outcome| state.record(owner.clone(), agent_id.clone(), outcome)),
-    )?;
+    let writes = state.write_gate();
+    let mut registry = state.install(registry, owner, agent_id, APPROVAL_TIMEOUT)?;
     registry.register_mutation(
         Engine::Unity,
         ToolDefinition::new(
@@ -195,45 +105,5 @@ fn not_executed(reason: &'static str) -> MutationReceipt {
     MutationReceipt {
         status: MutationStatus::NotExecuted,
         data: json!({"reason":reason}),
-    }
-}
-
-struct NameApprover {
-    state: Arc<UnityNameWrites>,
-    owner: String,
-    agent_id: String,
-}
-
-impl ToolApprover for NameApprover {
-    fn approve(&self, request: ToolApprovalRequest) -> ToolApprovalFuture {
-        let state = Arc::clone(&self.state);
-        let owner = self.owner.clone();
-        let agent_id = self.agent_id.clone();
-        Box::pin(async move {
-            let Ok(change) = serde_json::from_value(request.preview) else {
-                return ApprovalDecision::Deny;
-            };
-            let proposal = Proposal {
-                approval_id: request.invocation.approval_id.to_string(),
-                agent_id: agent_id.clone(),
-                run_id: request.invocation.run_id,
-                change,
-            };
-            if state
-                .pending
-                .ask(
-                    proposal.approval_id.clone(),
-                    owner,
-                    agent_id,
-                    proposal,
-                    request.deadline,
-                )
-                .await
-            {
-                ApprovalDecision::Approve
-            } else {
-                ApprovalDecision::Deny
-            }
-        })
     }
 }

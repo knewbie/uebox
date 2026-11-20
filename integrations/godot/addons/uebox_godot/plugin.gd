@@ -2,8 +2,9 @@
 extends EditorPlugin
 
 # The bridge is inactive unless all three per-editor environment variables are set.
-# No methods exposed by this server modify the project or editor scene.
-const MAX_REQUEST_BYTES := 8192
+# Read-only queries plus one guarded, undo-able scene node rename. No generic
+# command or code execution is exposed, and nothing auto-saves.
+const MAX_REQUEST_BYTES := 32768
 const MAX_RESPONSE_BYTES := 1048576
 const MAX_CLIENTS := 16
 const MAX_NODES := 2048
@@ -12,12 +13,15 @@ const MAX_NODE_NAME_CHARS := 1024
 const MAX_NODE_PATH_BYTES := 8192
 const MAX_METADATA_CHARS := 4096
 const CLIENT_LIFETIME_MS := 3000
+const TICKET_LIFETIME_MS := 60000
+const MAX_TICKETS := 64
 
 var _server := TCPServer.new()
 var _clients: Array[Dictionary] = []
 var _token := ""
 var _instance_id := ""
 var _project_path := ""
+var _tickets: Dictionary = {}
 
 
 func _enter_tree() -> void:
@@ -64,6 +68,7 @@ func _exit_tree() -> void:
     _clients.clear()
     _server.stop()
     _token = ""
+    _tickets.clear()
 
 
 func _is_hex(value: String, length: int) -> bool:
@@ -89,6 +94,7 @@ func _token_matches(candidate: String) -> bool:
 func _process(_delta: float) -> void:
     if not _server.is_listening():
         return
+    _purge_expired_tickets()
     # Bound work per frame and never wait on a client in the editor thread.
     for _index in range(8):
         if not _server.is_connection_available():
@@ -182,6 +188,12 @@ func _handle(line: String) -> Dictionary:
             result = _scene_tree()
             if result.has("_error"):
                 return _error(request_id, "response_too_large", result._error)
+        "scene.prepare_rename":
+            result = _prepare_rename(request)
+            if result.has("_error"):
+                return _error(request_id, result._error.code, result._error.message)
+        "scene.apply_rename":
+            result = _apply_rename(request)
         _:
             return _error(request_id, "unknown_command", "Command is not available")
     return {"version": 1, "request_id": request_id,
@@ -240,3 +252,147 @@ func _scene_tree() -> Dictionary:
                 break
             queue.append({"node": node.get_child(index), "parent": current_index})
     return {"scene_path": scene_path, "nodes": nodes, "truncated": truncated}
+
+
+func _prepare_rename(request: Dictionary) -> Dictionary:
+    var params: Variant = request.get("params")
+    if not params is Dictionary or not params.get("node_path") is String or not params.get("new_name") is String:
+        return {"_error": {"code": "invalid_request", "message": "Rename parameters are missing or invalid"}}
+    var node_path: String = params.get("node_path")
+    var new_name: String = params.get("new_name")
+    if not _valid_node_name(new_name):
+        return {"_error": {"code": "invalid_new_name", "message": "New node name is not allowed"}}
+    var root := EditorInterface.get_edited_scene_root()
+    if root == null:
+        return {"_error": {"code": "no_scene", "message": "No scene is open in the editor"}}
+    if node_path == ".":
+        return {"_error": {"code": "root_rejected", "message": "The scene root cannot be renamed"}}
+    if node_path.to_utf8_buffer().size() > MAX_NODE_PATH_BYTES:
+        return {"_error": {"code": "node_not_found", "message": "Node path is too long to exist"}}
+    var node := root.get_node_or_null(node_path)
+    if node == null or not root.is_ancestor_of(node) or node.owner != root:
+        return {"_error": {"code": "node_not_found", "message": "Node is not part of the edited scene"}}
+    var parent := node.get_parent()
+    if parent == null:
+        return {"_error": {"code": "node_not_found", "message": "Node is not part of the edited scene"}}
+    _purge_expired_tickets()
+    if _tickets.size() >= MAX_TICKETS:
+        return {"_error": {"code": "too_many_tickets", "message": "Too many outstanding rename tickets"}}
+    var scene_path: Variant = root.scene_file_path
+    if scene_path == "":
+        scene_path = null
+    var resolved_path := _relative_path(root, node)
+    var ticket := _new_ticket()
+    _tickets[ticket] = {
+        "scene_id": str(root.get_instance_id()),
+        "node_id": str(node.get_instance_id()),
+        "parent_id": str(parent.get_instance_id()),
+        "node_path": resolved_path,
+        "old_name": str(node.name),
+        "new_name": new_name,
+        "expires_at": Time.get_ticks_msec() + TICKET_LIFETIME_MS,
+    }
+    return {
+        "node_path": resolved_path,
+        "old_name": str(node.name),
+        "new_name": new_name,
+        "scene_path": scene_path,
+        "scene_id": str(root.get_instance_id()),
+        "node_id": str(node.get_instance_id()),
+        "ticket": ticket,
+        "expires_in_ms": TICKET_LIFETIME_MS,
+    }
+
+
+func _apply_rename(request: Dictionary) -> Dictionary:
+    var params: Variant = request.get("params")
+    if not params is Dictionary or not params.get("ticket") is String:
+        return _not_executed("invalid_request")
+    var ticket: String = params.get("ticket")
+    var prepared: Variant = _tickets.get(ticket)
+    if prepared == null:
+        return _not_executed("expired_or_consumed")
+    _tickets.erase(ticket)
+    if int(prepared.expires_at) <= Time.get_ticks_msec():
+        return _not_executed("expired_or_consumed")
+    var root := EditorInterface.get_edited_scene_root()
+    if root == null or str(root.get_instance_id()) != str(prepared.scene_id):
+        return _not_executed("context_changed")
+    var target: Object = instance_from_id(int(prepared.node_id))
+    if target == null or not target is Node:
+        return _not_executed("node_changed")
+    var node: Node = target
+    if node == root or not root.is_ancestor_of(node) or node.owner != root:
+        return _not_executed("node_changed")
+    var parent := node.get_parent()
+    if parent == null or str(parent.get_instance_id()) != str(prepared.parent_id):
+        return _not_executed("node_changed")
+    if _relative_path(root, node) != str(prepared.node_path):
+        return _not_executed("node_changed")
+    var old_name: String = str(prepared.old_name)
+    if str(node.name) != old_name:
+        return _not_executed("name_changed")
+    var new_name: String = str(prepared.new_name)
+    for sibling_index in range(parent.get_child_count()):
+        var sibling := parent.get_child(sibling_index)
+        if sibling != node and sibling.name == new_name:
+            return _not_executed("name_collision")
+    var undo := get_undo_redo()
+    if undo == null:
+        return _not_executed("undo_unavailable")
+    undo.create_action("Rename Node")
+    undo.add_do_method(node, "set_name", new_name)
+    undo.add_undo_method(node, "set_name", old_name)
+    undo.commit_action()
+    if not is_instance_valid(root) or not is_instance_valid(node):
+        return {"status": "unknown"}
+    var actual_name := str(node.name)
+    var node_id := str(node.get_instance_id())
+    var scene_id := str(root.get_instance_id())
+    if actual_name != new_name:
+        return {"status": "mismatch", "actual_name": actual_name, "scene_id": scene_id, "node_id": node_id}
+    return {"status": "applied", "actual_name": actual_name, "scene_id": scene_id, "node_id": node_id}
+
+
+func _relative_path(root: Node, node: Node) -> String:
+    var parts := PackedStringArray()
+    var cursor: Node = node
+    while cursor != root:
+        parts.append(str(cursor.name))
+        var next := cursor.get_parent()
+        if next == null:
+            return ""
+        cursor = next
+    if parts.is_empty():
+        return "."
+    parts.reverse()
+    return "/".join(parts)
+
+
+func _not_executed(reason: String) -> Dictionary:
+    return {"status": "not_executed", "reason": reason}
+
+
+func _new_ticket() -> String:
+    var crypto := Crypto.new()
+    return crypto.generate_random_bytes(16).hex_encode()
+
+
+func _purge_expired_tickets() -> void:
+    var now := Time.get_ticks_msec()
+    for key in _tickets.keys():
+        var entry: Dictionary = _tickets[key]
+        if int(entry.expires_at) <= now:
+            _tickets.erase(key)
+
+
+func _valid_node_name(value: String) -> bool:
+    if value.is_empty() or value.length() > MAX_NODE_NAME_CHARS:
+        return false
+    if value == "." or value == "..":
+        return false
+    for character in value:
+        var code := character.unicode_at(0)
+        if code < 32 or code == 127 or character == "/" or character == ":":
+            return false
+    return true

@@ -1,6 +1,9 @@
 //! A synchronous, in-process client for the opt-in Godot editor addon.
 //! Every call targets one loopback endpoint, project, and editor instance.
 
+mod rename;
+
+pub use rename::{NodeRenameOutcome, PreparedNodeRename};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{
     fmt,
@@ -197,6 +200,8 @@ struct Request<'a> {
     token: &'a str,
     target: Identity<'a>,
     command: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    params: Option<serde_json::Value>,
 }
 #[derive(Serialize)]
 struct Identity<'a> {
@@ -240,6 +245,15 @@ impl GodotClient {
     }
 
     fn query<T: DeserializeOwned>(&self, command: &'static str) -> Result<T, Error> {
+        self.query_with(command, None, &mut false)
+    }
+
+    fn query_with<T: DeserializeOwned>(
+        &self,
+        command: &'static str,
+        params: Option<serde_json::Value>,
+        dispatched: &mut bool,
+    ) -> Result<T, Error> {
         #[cfg(unix)]
         ensure_no_lossy_alias(Path::new(&self.target.project_path))?;
         let deadline = Instant::now()
@@ -255,6 +269,7 @@ impl GodotClient {
                 instance_id: &self.target.instance_id,
             },
             command,
+            params,
         };
         let mut bytes = serde_json::to_vec(&request)
             .map_err(|_| Error::Protocol("cannot encode request".into()))?;
@@ -267,6 +282,7 @@ impl GodotClient {
         stream
             .set_write_timeout(Some(remaining(deadline)?))
             .map_err(|error| map_socket_io(&stream, error))?;
+        *dispatched = true;
         stream
             .write_all(&bytes)
             .map_err(|error| map_socket_io(&stream, error))?;

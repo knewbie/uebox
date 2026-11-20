@@ -9,7 +9,7 @@ use uebox_agent_core::{
     Engine, ReadOnlyTool, RunTarget, ToolDefinition, ToolError, ToolFuture, ToolRegistry,
 };
 use uebox_engine_core::{EditorSelection, EngineKind, EngineRegistry};
-use uebox_godot_session::{GodotSession, SessionState};
+use uebox_godot_session::{GodotSession, NodeRenameOutcome, PreparedNodeRename, SessionState};
 
 /// The same release-aware handle used by the Godot host session manager.
 pub type GodotSessionHandle = Arc<Mutex<Option<GodotSession>>>;
@@ -90,6 +90,74 @@ impl GodotToolBinding {
                 gate: Arc::new(tokio::sync::Mutex::new(())),
             }),
         }))
+    }
+
+    pub fn project_root(&self) -> &std::path::Path {
+        self.inner.selection.project().root()
+    }
+
+    pub async fn prepare_node_rename(
+        &self,
+        target: &RunTarget,
+        path: String,
+        name: String,
+    ) -> Result<PreparedNodeRename, ToolError> {
+        let inner = self.inner.clone();
+        let permit = inner.gate.clone().try_lock_owned().map_err(|_| ToolError)?;
+        let target = target.clone();
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            let mut guard = inner.session.try_lock().map_err(|_| ToolError)?;
+            let session = guard.as_mut().ok_or(ToolError)?;
+            if !inner.current(&target) || !inner.same_ready_session(session) {
+                return Err(ToolError);
+            }
+            let prepared = session
+                .prepare_node_rename(&path, &name)
+                .map_err(|_| ToolError)?;
+            if inner.current(&target) && inner.same_ready_session(session) {
+                Ok(prepared)
+            } else {
+                Err(ToolError)
+            }
+        })
+        .await
+        .map_err(|_| ToolError)?
+    }
+
+    pub async fn apply_node_rename(
+        &self,
+        target: &RunTarget,
+        prepared: PreparedNodeRename,
+    ) -> NodeRenameOutcome {
+        let inner = self.inner.clone();
+        let Ok(permit) = inner.gate.clone().try_lock_owned() else {
+            return NodeRenameOutcome::NotExecuted {
+                reason: "target_busy",
+            };
+        };
+        let target = target.clone();
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            let Ok(mut guard) = inner.session.try_lock() else {
+                return NodeRenameOutcome::NotExecuted {
+                    reason: "target_busy",
+                };
+            };
+            let Some(session) = guard.as_mut() else {
+                return NodeRenameOutcome::NotExecuted {
+                    reason: "bridge_unavailable",
+                };
+            };
+            if !inner.current(&target) || !inner.same_ready_session(session) {
+                return NodeRenameOutcome::NotExecuted {
+                    reason: "target_changed",
+                };
+            }
+            session.apply_node_rename(prepared)
+        })
+        .await
+        .unwrap_or(NodeRenameOutcome::Unknown)
     }
 
     pub fn target(&self) -> RunTarget {
